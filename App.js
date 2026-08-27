@@ -15,6 +15,7 @@ import {
 import {
   loadDatabase,
   saveDatabase,
+  resetDatabase,
   getActiveVehicle,
   calculateDashboardStatus,
   getTOGroups
@@ -22,7 +23,7 @@ import {
 
 export default function App() {
   const [db, setDb] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'to-events', 'all-parts', 'settings', 'garage'
   const [theme, setTheme] = useState('dark');
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -31,11 +32,13 @@ export default function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [pendingAction, setPendingAction] = useState(null);
 
+  // Mileage modal
   const [mileageModalVisible, setMileageModalVisible] = useState(false);
   const [inputKm, setInputKm] = useState('');
   const [inputHours, setInputHours] = useState('');
   const [mileageHint, setMileageHint] = useState(null);
 
+  // TO Modal
   const [toModalVisible, setToModalVisible] = useState(false);
   const [editingToTag, setEditingToTag] = useState('');
   const [toTag, setToTag] = useState('');
@@ -44,6 +47,7 @@ export default function App() {
   const [toHours, setToHours] = useState('');
   const [toParts, setToParts] = useState([]);
 
+  // Garage Modal
   const [garageModalVisible, setGarageModalVisible] = useState(false);
   const [editCarId, setEditCarId] = useState(null);
   const [carBrand, setCarBrand] = useState('');
@@ -54,6 +58,7 @@ export default function App() {
   const [carVin, setCarVin] = useState('');
   const [carOil, setCarOil] = useState('');
 
+  // Tracker / Regulation Modal
   const [trackerModalVisible, setTrackerModalVisible] = useState(false);
   const [editingTrackerId, setEditingTrackerId] = useState(null);
   const [trName, setTrName] = useState('');
@@ -66,11 +71,17 @@ export default function App() {
   const [trSpec, setTrSpec] = useState('');
   const [trBrand, setTrBrand] = useState('');
   const [trArticle, setTrArticle] = useState('');
+  const [trIcon, setTrIcon] = useState('⚙️');
 
+  // Backup Import Modal
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importJsonText, setImportJsonText] = useState('');
+
+  // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
 
-  // Password change state
+  // Password change
   const [oldPwd, setOldPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
 
@@ -81,7 +92,7 @@ export default function App() {
   const initApp = async () => {
     const loaded = await loadDatabase();
     setDb(loaded);
-    if (loaded.theme) setTheme(loaded.theme);
+    if (loaded && loaded.theme) setTheme(loaded.theme);
   };
 
   const updateDb = async (newDb) => {
@@ -100,7 +111,7 @@ export default function App() {
   };
 
   const handleLogin = () => {
-    const expected = db.admin_password || 'admin';
+    const expected = db?.admin_password || 'admin';
     if (authPassword === expected) {
       setIsAdmin(true);
       setAuthModalVisible(false);
@@ -131,14 +142,19 @@ export default function App() {
 
   const isDark = theme === 'dark';
   const colors = {
-    bg: isDark ? '#0f172a' : '#f1f5f9',
+    bg: isDark ? '#0b1120' : '#f8fafc',
     card: isDark ? '#1e293b' : '#ffffff',
     cardBorder: isDark ? '#334155' : '#e2e8f0',
+    cardSecondary: isDark ? '#141e33' : '#f1f5f9',
     text: isDark ? '#f8fafc' : '#0f172a',
     textMuted: isDark ? '#94a3b8' : '#64748b',
-    primary: '#2563eb',
-    inputBg: isDark ? '#090d16' : '#f8fafc',
+    primary: '#3b82f6',
+    primaryBg: isDark ? '#1e3a8a30' : '#dbeafe',
+    inputBg: isDark ? '#0f172a' : '#ffffff',
     inputBorder: isDark ? '#334155' : '#cbd5e1',
+    success: '#10b981',
+    warning: '#f59e0b',
+    danger: '#ef4444'
   };
 
   const activeVehicle = getActiveVehicle(db);
@@ -147,8 +163,9 @@ export default function App() {
 
   // --- MILEAGE MODAL HANDLERS ---
   const openMileageModal = () => {
-    const lastKm = (db.maintenance_records || []).reduce((max, r) => Math.max(max, r.mileage || 0), 0);
-    const lastH = (db.maintenance_records || []).reduce((max, r) => Math.max(max, r.engine_hours || 0), 0);
+    const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === activeVehicle?.id);
+    const lastKm = records.reduce((max, r) => Math.max(max, Number(r.mileage) || 0), 0);
+    const lastH = records.reduce((max, r) => Math.max(max, Number(r.engine_hours) || 0), 0);
 
     setInputKm(String(activeVehicle?.current_km || lastKm || 25340));
     setInputHours(String(activeVehicle?.current_engine_hours || lastH || 772));
@@ -159,7 +176,9 @@ export default function App() {
   const onMileageInputChange = (val) => {
     setInputKm(val);
     const num = parseInt(val, 10) || 0;
-    const lastKm = (db.maintenance_records || []).reduce((max, r) => Math.max(max, r.mileage || 0), 0);
+    const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === activeVehicle?.id);
+    const lastKm = records.reduce((max, r) => Math.max(max, Number(r.mileage) || 0), 0);
+
     if (lastKm > 0 && num > 0 && num < lastKm) {
       setMileageHint({ num, combined: lastKm + num, lastKm });
     } else {
@@ -185,7 +204,7 @@ export default function App() {
     });
   };
 
-  // --- TO GROUP MODAL HANDLERS ---
+  // --- TO EVENT HANDLERS ---
   const openNewTOModal = () => {
     requireAuth(() => {
       setEditingToTag('');
@@ -196,17 +215,17 @@ export default function App() {
       setToHours(String(activeVehicle?.current_engine_hours || 772));
       setToParts([
         {
-          id: 1,
+          id: Date.now(),
           category: 'Двигатель',
-          item_name: 'Масло моторное',
-          brand: 'Лукойл Genesis ARMORTECH JP 0W-20',
+          item_name: 'Масло моторное (0W-20)',
+          brand: 'Лукойл Genesis JP',
           article: '1658134508',
-          quantity: 4.5,
+          quantity: '4.5',
           unit: 'л',
-          price_type: 'total',
-          price: 3600,
-          interval_km: 7500,
-          interval_hours: 250,
+          price_type: 'total', // 'total' (за позицию) или 'unit' (за 1 ед.)
+          price: '3600',
+          interval_km: '7500',
+          interval_hours: '250',
           store: 'Ozon'
         }
       ]);
@@ -222,17 +241,17 @@ export default function App() {
       setToKm(String(group.mileage));
       setToHours(String(group.engine_hours));
       setToParts(group.parts.map((p, idx) => ({
-        id: idx + 1,
-        category: p.category || 'Прочее',
-        item_name: p.item_name,
+        id: p.id || Date.now() + idx,
+        category: p.category || 'Двигатель',
+        item_name: p.item_name || '',
         brand: p.brand || '',
         article: p.article || '',
-        quantity: p.quantity || 1,
+        quantity: String(p.quantity || 1),
         unit: p.unit || 'шт',
         price_type: p.price_type || 'total',
-        price: p.total_price || p.price_per_unit || 0,
-        interval_km: p.interval_km || 7500,
-        interval_hours: p.interval_hours || 0,
+        price: String(p.price_type === 'unit' ? (p.price_per_unit || p.total_price) : (p.total_price || p.price_per_unit || 0)),
+        interval_km: String(p.interval_km || 7500),
+        interval_hours: String(p.interval_hours || 0),
         store: p.store || ''
       })));
       setToModalVisible(true);
@@ -248,12 +267,12 @@ export default function App() {
         item_name: '',
         brand: '',
         article: '',
-        quantity: 1,
+        quantity: '1',
         unit: 'шт',
         price_type: 'total',
         price: '',
-        interval_km: 7500,
-        interval_hours: 250,
+        interval_km: '7500',
+        interval_hours: '250',
         store: 'Ozon'
       }
     ]);
@@ -265,6 +284,32 @@ export default function App() {
 
   const updatePartField = (id, field, val) => {
     setToParts(toParts.map(p => p.id === id ? { ...p, [field]: val } : p));
+  };
+
+  const populatePartFromTracker = (partId, tracker) => {
+    setToParts(toParts.map(p => {
+      if (p.id === partId) {
+        return {
+          ...p,
+          category: tracker.category,
+          item_name: tracker.name,
+          brand: tracker.brand || '',
+          article: tracker.article || '',
+          interval_km: String(tracker.interval_km || 7500),
+          interval_hours: String(tracker.interval_hours || 0)
+        };
+      }
+      return p;
+    }));
+  };
+
+  const calculateLiveTOTotal = () => {
+    return toParts.reduce((sum, p) => {
+      const qty = parseFloat(p.quantity) || 1;
+      const pr = parseFloat(p.price) || 0;
+      const rowTotal = p.price_type === 'unit' ? (pr * qty) : pr;
+      return sum + rowTotal;
+    }, 0);
   };
 
   const saveTOEvent = () => {
@@ -281,13 +326,12 @@ export default function App() {
     const hoursNum = parseInt(toHours, 10) || 0;
     const vId = activeVehicle.id;
 
-    // Filter out old records if editing
     let currentRecords = (db.maintenance_records || []);
     if (editingToTag) {
       currentRecords = currentRecords.filter(r => !(r.vehicle_id === vId && r.to_tag === editingToTag));
     }
 
-    let maxId = currentRecords.reduce((max, r) => Math.max(max, r.id || 0), 0);
+    let maxId = currentRecords.reduce((max, r) => Math.max(max, Number(r.id) || 0), 0);
 
     const newRecords = toParts.map(p => {
       maxId += 1;
@@ -301,12 +345,12 @@ export default function App() {
       return {
         id: maxId,
         vehicle_id: vId,
-        to_tag: toTag,
-        date: toDate,
+        to_tag: toTag.trim(),
+        date: toDate.trim(),
         mileage: mileageNum,
         engine_hours: hoursNum,
-        category: p.category,
-        item_name: p.item_name,
+        category: p.category || 'Двигатель',
+        item_name: p.item_name || 'Деталь',
         brand: p.brand || '',
         article: p.article || '',
         quantity: qty,
@@ -327,8 +371,8 @@ export default function App() {
       if (v.id === vId) {
         return {
           ...v,
-          current_km: Math.max(v.current_km || 0, mileageNum),
-          current_engine_hours: Math.max(v.current_engine_hours || 0, hoursNum)
+          current_km: Math.max(Number(v.current_km) || 0, mileageNum),
+          current_engine_hours: Math.max(Number(v.current_engine_hours) || 0, hoursNum)
         };
       }
       return v;
@@ -355,6 +399,7 @@ export default function App() {
             const vId = activeVehicle.id;
             const updated = (db.maintenance_records || []).filter(r => !(r.vehicle_id === vId && r.to_tag === tag));
             updateDb({ ...db, maintenance_records: updated });
+            Alert.alert('Удалено', `Событие ${tag} удалено`);
           }
         }
       ]);
@@ -362,11 +407,6 @@ export default function App() {
   };
 
   // --- GARAGE HANDLERS ---
-  const openGarage = () => {
-    fillCarForm(activeVehicle);
-    setGarageModalVisible(true);
-  };
-
   const fillCarForm = (v) => {
     if (v) {
       setEditCarId(v.id);
@@ -411,7 +451,7 @@ export default function App() {
         } : v);
       } else {
         const newId = `car_${Date.now()}`;
-        vehicles.push({
+        const newCar = {
           id: newId,
           brand: carBrand.trim(),
           model: carModel.trim(),
@@ -423,32 +463,198 @@ export default function App() {
           oil_spec: carOil.trim(),
           current_km: 0,
           current_engine_hours: 0
-        });
+        };
+        vehicles.push(newCar);
         db.active_vehicle_id = newId;
       }
 
       updateDb({ ...db, vehicles });
       setGarageModalVisible(false);
-      Alert.alert('Успешно', 'Гараж обновлен');
+      Alert.alert('Успешно', 'Автомобиль сохранен в гараже');
     });
   };
 
   const switchCar = (id) => {
     updateDb({ ...db, active_vehicle_id: id });
-    setGarageModalVisible(false);
   };
 
-  // --- BACKUP & EXPORT / IMPORT ---
+  const deleteCar = (id) => {
+    requireAuth(() => {
+      if ((db.vehicles || []).length <= 1) {
+        Alert.alert('Ошибка', 'Нельзя удалить единственный автомобиль');
+        return;
+      }
+      Alert.alert('Удаление авто', 'Удалить этот автомобиль и его историю ТО?', [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Удалить',
+          style: 'destructive',
+          onPress: () => {
+            const nextVehicles = (db.vehicles || []).filter(v => v.id !== id);
+            const nextActive = id === db.active_vehicle_id ? nextVehicles[0].id : db.active_vehicle_id;
+            const nextRecords = (db.maintenance_records || []).filter(r => r.vehicle_id !== id);
+            updateDb({
+              ...db,
+              active_vehicle_id: nextActive,
+              vehicles: nextVehicles,
+              maintenance_records: nextRecords
+            });
+            Alert.alert('Удалено', 'Автомобиль удален из гаража');
+          }
+        }
+      ]);
+    });
+  };
+
+  // --- TRACKERS / REGULATIONS HANDLERS ---
+  const openEditTrackerModal = (tr) => {
+    requireAuth(() => {
+      if (tr) {
+        setEditingTrackerId(tr.id);
+        setTrName(tr.name || '');
+        setTrCategory(tr.category || 'Двигатель');
+        setTrMatch(tr.match || '');
+        setTrKm(String(tr.interval_km || 7500));
+        setTrHours(String(tr.interval_hours || 0));
+        setTrWarnKm(String(tr.warn_km || 1500));
+        setTrWarnHours(String(tr.warn_hours || 0));
+        setTrSpec(tr.spec || '');
+        setTrBrand(tr.brand || '');
+        setTrArticle(tr.article || '');
+        setTrIcon(tr.icon || '⚙️');
+      } else {
+        setEditingTrackerId(null);
+        setTrName('');
+        setTrCategory('Двигатель');
+        setTrMatch('');
+        setTrKm('7500');
+        setTrHours('0');
+        setTrWarnKm('1500');
+        setTrWarnHours('0');
+        setTrSpec('');
+        setTrBrand('');
+        setTrArticle('');
+        setTrIcon('⚙️');
+      }
+      setTrackerModalVisible(true);
+    });
+  };
+
+  const saveTracker = () => {
+    requireAuth(() => {
+      if (!trName.trim()) {
+        Alert.alert('Ошибка', 'Введите наименование регламента');
+        return;
+      }
+
+      let trackers = [...(db.trackers || [])];
+      const kmNum = parseInt(trKm, 10) || 7500;
+      const hoursNum = parseInt(trHours, 10) || 0;
+      const warnKmNum = parseInt(trWarnKm, 10) || 1500;
+      const warnHoursNum = parseInt(trWarnHours, 10) || 0;
+
+      if (editingTrackerId) {
+        trackers = trackers.map(t => t.id === editingTrackerId ? {
+          ...t,
+          name: trName.trim(),
+          category: trCategory.trim(),
+          match: trMatch.trim() || trName.trim().toLowerCase(),
+          interval_km: kmNum,
+          interval_hours: hoursNum,
+          warn_km: warnKmNum,
+          warn_hours: warnHoursNum,
+          spec: trSpec.trim(),
+          brand: trBrand.trim(),
+          article: trArticle.trim(),
+          icon: trIcon.trim() || '⚙️'
+        } : t);
+      } else {
+        trackers.push({
+          id: `tr_${Date.now()}`,
+          name: trName.trim(),
+          category: trCategory.trim(),
+          match: trMatch.trim() || trName.trim().toLowerCase(),
+          interval_km: kmNum,
+          interval_hours: hoursNum,
+          warn_km: warnKmNum,
+          warn_hours: warnHoursNum,
+          spec: trSpec.trim(),
+          brand: trBrand.trim(),
+          article: trArticle.trim(),
+          icon: trIcon.trim() || '⚙️',
+          enabled: true
+        });
+      }
+
+      updateDb({ ...db, trackers });
+      setTrackerModalVisible(false);
+      Alert.alert('Успешно', 'Регламент сохранен');
+    });
+  };
+
+  const deleteTracker = (id) => {
+    requireAuth(() => {
+      Alert.alert('Удаление регламента', 'Вы уверены, что хотите удалить этот регламент?', [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Удалить',
+          style: 'destructive',
+          onPress: () => {
+            const nextTrackers = (db.trackers || []).filter(t => t.id !== id);
+            updateDb({ ...db, trackers: nextTrackers });
+            Alert.alert('Удалено', 'Регламент удален');
+          }
+        }
+      ]);
+    });
+  };
+
+  // --- BACKUP EXPORT & IMPORT ---
   const exportBackup = async () => {
     try {
       const jsonStr = JSON.stringify(db, null, 2);
       await Share.share({
         message: jsonStr,
-        title: 'car_maintenance_backup.json'
+        title: `car_maintenance_backup_${new Date().toISOString().split('T')[0]}.json`
       });
     } catch (e) {
       Alert.alert('Ошибка экспорта', e.message);
     }
+  };
+
+  const handleImportBackup = () => {
+    requireAuth(() => {
+      try {
+        const parsed = JSON.parse(importJsonText);
+        if (!parsed.vehicles || !parsed.trackers) {
+          Alert.alert('Ошибка', 'Некорректная структура файла бэкапа JSON');
+          return;
+        }
+        updateDb(parsed);
+        setImportModalVisible(false);
+        setImportJsonText('');
+        Alert.alert('Успешно', 'База данных успешно восстановлена из бэкапа!');
+      } catch (e) {
+        Alert.alert('Ошибка парсинга', 'Введен некорректный JSON текст');
+      }
+    });
+  };
+
+  const handleResetDb = () => {
+    requireAuth(() => {
+      Alert.alert('Сброс базы данных', 'Сбросить все данные к исходным заводским настройкам (Changan CS55 Plus, ТО-2, ТО-3)?', [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Сбросить',
+          style: 'destructive',
+          onPress: async () => {
+            const fresh = await resetDatabase();
+            setDb(fresh);
+            Alert.alert('Сброшено', 'База данных сброшена к исходным значениям');
+          }
+        }
+      ]);
+    });
   };
 
   const changePassword = () => {
@@ -471,12 +677,14 @@ export default function App() {
 
   // Filtered parts for Tab 3
   const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === activeVehicle?.id);
+  const categoriesList = ['Все', 'Двигатель', 'Фильтры', 'Зажигание', 'Охлаждение', 'Тормоза', 'Трансмиссия', 'Прочее'];
   const filteredRecords = records.filter(r => {
-    const matchCat = !categoryFilter || r.category === categoryFilter;
+    const matchCat = !categoryFilter || categoryFilter === 'Все' || r.category === categoryFilter;
     const matchSearch = !searchTerm ||
       (r.item_name && r.item_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (r.brand && r.brand.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (r.article && r.article.toLowerCase().includes(searchTerm.toLowerCase()));
+      (r.article && r.article.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (r.to_tag && r.to_tag.toLowerCase().includes(searchTerm.toLowerCase()));
     return matchCat && matchSearch;
   });
 
@@ -486,13 +694,13 @@ export default function App() {
 
       {/* --- TOP HEADER --- */}
       <View style={[styles.topHeader, { backgroundColor: colors.card, borderBottomColor: colors.cardBorder }]}>
-        <TouchableOpacity style={styles.headerLeft} onPress={openGarage} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.headerLeft} onPress={() => setActiveTab('garage')} activeOpacity={0.7}>
           <View style={styles.carIconBox}>
             <Text style={{ fontSize: 18 }}>🚗</Text>
           </View>
-          <View>
+          <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={[styles.carNameText, { color: colors.text }]}>{activeVehicle?.name || 'Автомобиль'}</Text>
+              <Text style={[styles.carNameText, { color: colors.text }]} numberOfLines={1}>{activeVehicle?.name || 'Автомобиль'}</Text>
               {activeVehicle?.plate ? (
                 <View style={styles.plateBadge}>
                   <Text style={styles.plateBadgeText}>{activeVehicle.plate}</Text>
@@ -500,13 +708,13 @@ export default function App() {
               ) : null}
             </View>
             <Text style={[styles.carSubText, { color: colors.textMuted }]}>
-              {activeVehicle?.engine || '1.5T'} • Гараж
+              {activeVehicle?.engine || '1.5T 7DCT'} • {Number(activeVehicle?.current_km || 0).toLocaleString('ru-RU')} км
             </Text>
           </View>
         </TouchableOpacity>
 
         <View style={styles.headerRight}>
-          <TouchableOpacity onPress={toggleTheme} style={[styles.iconButton, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
+          <TouchableOpacity onPress={toggleTheme} style={[styles.iconButton, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}>
             <Text style={{ fontSize: 15 }}>{isDark ? '☀️' : '🌙'}</Text>
           </TouchableOpacity>
 
@@ -514,54 +722,78 @@ export default function App() {
             onPress={() => {
               if (isAdmin) {
                 setIsAdmin(false);
-                Alert.alert('Выход', 'Режим редактирования отключен');
+                Alert.alert('Выход', 'Сессия администратора завершена');
               } else {
                 setAuthPassword('');
                 setAuthModalVisible(true);
               }
             }}
-            style={[styles.authButton, { backgroundColor: isAdmin ? '#10b98120' : colors.inputBg, borderColor: isAdmin ? '#10b981' : colors.cardBorder }]}
+            style={[styles.authButton, { backgroundColor: isAdmin ? '#10b98120' : colors.cardSecondary, borderColor: isAdmin ? '#10b981' : colors.cardBorder }]}
           >
-            <Text style={{ fontSize: 12 }}>{isAdmin ? '🔓 Выйти' : '🔒 Войти'}</Text>
+            <Text style={{ fontSize: 11, fontWeight: 'bold', color: isAdmin ? '#10b981' : colors.textMuted }}>
+              {isAdmin ? '🔓 Режим: Админ' : '🔒 Войти'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {/* --- MAIN TAB CONTENT --- */}
-      <ScrollView style={styles.mainScrollView} contentContainerStyle={{ paddingBottom: 90 }}>
-        {/* TAB 1: DASHBOARD */}
+      <ScrollView style={styles.mainScrollView} contentContainerStyle={{ paddingBottom: 95 }} showsVerticalScrollIndicator={false}>
+        {/* ======================================================== */}
+        {/* TAB 1: DASHBOARD & TRAFFIC LIGHT                         */}
+        {/* ======================================================== */}
         {activeTab === 'dashboard' && (
           <View style={styles.tabContent}>
             {/* KPI Cards Grid */}
             <View style={styles.kpiGrid}>
+              {/* Mileage & Hours */}
               <View style={[styles.kpiCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <View style={styles.kpiHeader}>
                   <Text style={[styles.kpiLabel, { color: colors.textMuted }]}>ПРОБЕГ</Text>
                   <TouchableOpacity onPress={openMileageModal} style={styles.kpiEditBtn}>
-                    <Text style={{ fontSize: 10, color: '#2563eb', fontWeight: 'bold' }}>Изменить</Text>
+                    <Text style={{ fontSize: 10, color: '#3b82f6', fontWeight: 'bold' }}>Изменить ✎</Text>
                   </TouchableOpacity>
                 </View>
                 <Text style={[styles.kpiValue, { color: colors.text }]}>
                   {Number(statusData.kpi.current_km).toLocaleString('ru-RU')} км
                 </Text>
-                <Text style={[styles.kpiSub, { color: '#f59e0b' }]}>
-                  {statusData.kpi.current_hours} м/ч • {statusData.kpi.avg_speed} км/ч
+                <Text style={[styles.kpiSub, { color: colors.warning }]}>
+                  ⏱ {statusData.kpi.current_hours} м/ч • ⌀ {statusData.kpi.avg_speed} км/ч
                 </Text>
               </View>
 
+              {/* Total Expenses */}
               <View style={[styles.kpiCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <Text style={[styles.kpiLabel, { color: colors.textMuted }]}>ЗАТРАТЫ НА ТО</Text>
-                <Text style={[styles.kpiValue, { color: '#10b981' }]}>
+                <Text style={[styles.kpiValue, { color: colors.success }]}>
                   {Number(statusData.kpi.total_spent).toLocaleString('ru-RU')} ₽
                 </Text>
                 <Text style={[styles.kpiSub, { color: colors.textMuted }]}>
-                  {statusData.kpi.cost_per_km} ₽/км
+                  📊 {statusData.kpi.cost_per_km} ₽/км • {toGroups.length} ТО
                 </Text>
               </View>
             </View>
 
-            {/* Consumables Traffic-Light List */}
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Ресурс расходников («Светофор»):</Text>
+            {/* Vehicle Oil Spec & Info Banner */}
+            {activeVehicle?.oil_spec ? (
+              <View style={[styles.infoBanner, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}>
+                <Text style={{ fontSize: 13 }}>🛢️ <Text style={{ fontWeight: 'bold', color: colors.text }}>Масло:</Text> <Text style={{ color: colors.textMuted }}>{activeVehicle.oil_spec}</Text></Text>
+              </View>
+            ) : null}
+
+            {/* Traffic-Light Status Section Header */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, marginTop: 6 }}>
+              <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+                Ресурс расходников («Светофор»)
+              </Text>
+              <View style={styles.attentionPill}>
+                <Text style={styles.attentionPillText}>
+                  {statusData.kpi.attention_count > 0 ? `⚠️ Внимание: ${statusData.kpi.attention_count}` : '✅ Всё в норме'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Consumables Traffic-Light Cards */}
             {statusData.consumables.map(c => {
               const isWarning = c.status_code === 'warning';
               const isDanger = c.status_code === 'danger';
@@ -570,29 +802,33 @@ export default function App() {
               const barColor = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
 
               return (
-                <View key={c.id} style={[styles.consumableCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <View key={c.id} style={[styles.consumableCard, { backgroundColor: colors.card, borderColor: isDanger ? '#ef444460' : colors.cardBorder }]}>
                   <View style={styles.consumableHeader}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                      <Text style={{ fontSize: 22 }}>{c.icon}</Text>
+                      <Text style={{ fontSize: 24 }}>{c.icon}</Text>
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.consumableTitle, { color: colors.text }]}>{c.name}</Text>
                         <Text style={[styles.consumableSub, { color: colors.textMuted }]}>
-                          {c.brand} {c.article ? '• ' + c.article : ''}
+                          {c.brand} {c.article ? `• ${c.article}` : ''}
                         </Text>
                       </View>
                     </View>
                     <View style={[styles.statusBadge, { backgroundColor: badgeBg, borderColor: badgeColor }]}>
-                      <Text style={[styles.statusBadgeText, { color: badgeColor }]}>{c.status_text}</Text>
+                      <Text style={[styles.statusBadgeText, { color: badgeColor }]}>
+                        {isDanger ? '🔴 ' : isWarning ? '🟡 ' : '🟢 '}{c.status_text}
+                      </Text>
                     </View>
                   </View>
 
                   {/* Progress bar */}
                   <View style={styles.progressContainer}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Износ ресурса:</Text>
-                      <Text style={{ fontSize: 11, fontWeight: 'bold', color: colors.text }}>{c.wear_percent}%</Text>
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                        Износ ресурса ({c.interval_km} км {c.interval_hours > 0 ? `/ ${c.interval_hours} ч` : ''}):
+                      </Text>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: badgeColor }}>{c.wear_percent}%</Text>
                     </View>
-                    <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#0f172a' : '#e2e8f0' }]}>
+                    <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#0b1120' : '#e2e8f0' }]}>
                       <View style={[styles.progressBarFill, { width: `${Math.min(100, c.wear_percent)}%`, backgroundColor: barColor }]} />
                     </View>
                   </View>
@@ -608,27 +844,48 @@ export default function App() {
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={{ fontSize: 10, color: colors.textMuted }}>Замена на одометре:</Text>
                       <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text }}>
-                        {Number(c.next_km).toLocaleString('ru-RU')} км
+                        {Number(c.next_km).toLocaleString('ru-RU')} км {c.next_hours ? `(${c.next_hours} м/ч)` : ''}
                       </Text>
                     </View>
                   </View>
+
+                  {/* Last replaced info */}
+                  {c.last_km > 0 ? (
+                    <View style={styles.lastReplacedRow}>
+                      <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                        Заменено на {c.to_tag} ({c.last_date} • {Number(c.last_km).toLocaleString('ru-RU')} км)
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               );
             })}
           </View>
         )}
 
-        {/* TAB 2: TO EVENTS */}
+        {/* ======================================================== */}
+        {/* TAB 2: TO EVENTS                                         */}
+        {/* ======================================================== */}
         {activeTab === 'to-events' && (
           <View style={styles.tabContent}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
               <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                События ТО ({toGroups.length})
+                Журнал ТО ({toGroups.length})
               </Text>
               <TouchableOpacity onPress={openNewTOModal} style={styles.addBtn}>
                 <Text style={styles.addBtnText}>+ Добавить ТО</Text>
               </TouchableOpacity>
             </View>
+
+            {toGroups.length === 0 ? (
+              <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={{ fontSize: 28, marginBottom: 8 }}>🛠️</Text>
+                <Text style={{ fontSize: 14, fontWeight: 'bold', color: colors.text }}>Записей ТО пока нет</Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 4, textAlign: 'center' }}>
+                  Нажмите кнопку «+ Добавить ТО», чтобы внести проведенное обслуживание.
+                </Text>
+              </View>
+            ) : null}
 
             {toGroups.map(group => (
               <View key={group.to_tag} style={[styles.toCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -642,28 +899,30 @@ export default function App() {
                         {Number(group.mileage).toLocaleString('ru-RU')} км
                       </Text>
                     </View>
-                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                      {group.date} • {group.engine_hours} м/ч
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 3 }}>
+                      📅 {group.date} • ⏱ {group.engine_hours} м/ч
                     </Text>
                   </View>
 
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={{ fontSize: 10, color: colors.textMuted }}>Сумма ТО:</Text>
-                    <Text style={{ fontSize: 15, fontWeight: 'bold', color: '#10b981' }}>
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: colors.success }}>
                       {Number(group.total_cost).toLocaleString('ru-RU')} ₽
                     </Text>
                   </View>
                 </View>
 
-                {/* Parts list */}
+                {/* Parts list inside TO */}
                 <View style={[styles.toPartsList, { borderTopColor: colors.cardBorder }]}>
-                  {group.parts.map(p => (
-                    <View key={p.id} style={styles.toPartRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.toPartName, { color: colors.text }]}>{p.item_name}</Text>
-                        <Text style={{ fontSize: 10, color: colors.textMuted }}>{p.brand} • {p.quantity} {p.unit}</Text>
+                  {group.parts.map((p, idx) => (
+                    <View key={p.id || idx} style={styles.toPartRow}>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={[styles.toPartName, { color: colors.text }]}>• {p.item_name}</Text>
+                        <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                          {p.brand} {p.article ? `[${p.article}]` : ''} • {p.quantity} {p.unit}
+                        </Text>
                       </View>
-                      <Text style={[styles.toPartPrice, { color: '#10b981' }]}>
+                      <Text style={[styles.toPartPrice, { color: colors.success }]}>
                         {Number(p.total_price).toLocaleString('ru-RU')} ₽
                       </Text>
                     </View>
@@ -673,7 +932,7 @@ export default function App() {
                 {/* Actions */}
                 <View style={[styles.toCardActions, { borderTopColor: colors.cardBorder }]}>
                   <TouchableOpacity onPress={() => openEditTOModal(group)} style={styles.actionBtn}>
-                    <Text style={{ fontSize: 12, color: '#3b82f6', fontWeight: '600' }}>✏️ Редактировать ТО</Text>
+                    <Text style={{ fontSize: 12, color: '#3b82f6', fontWeight: '600' }}>✏️ Редактировать</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={() => deleteTOEvent(group.to_tag)} style={styles.actionBtn}>
                     <Text style={{ fontSize: 12, color: '#ef4444', fontWeight: '600' }}>🗑️ Удалить</Text>
@@ -684,53 +943,137 @@ export default function App() {
           </View>
         )}
 
-        {/* TAB 3: ALL PARTS */}
+        {/* ======================================================== */}
+        {/* TAB 3: ALL PARTS JOURNAL                                 */}
+        {/* ======================================================== */}
         {activeTab === 'all-parts' && (
           <View style={styles.tabContent}>
+            {/* Search Input */}
             <TextInput
               style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.cardBorder, color: colors.text }]}
-              placeholder="Поиск по деталям, брендам, артикулам..."
+              placeholder="🔍 Поиск по названию, бренду (Лукойл, VIC, ZIC), артикулу..."
               placeholderTextColor={colors.textMuted}
               value={searchTerm}
               onChangeText={setSearchTerm}
             />
 
+            {/* Category Filter Pills */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                {categoriesList.map(cat => {
+                  const isSel = (!categoryFilter && cat === 'Все') || categoryFilter === cat;
+                  return (
+                    <TouchableOpacity
+                      key={cat}
+                      onPress={() => setCategoryFilter(cat === 'Все' ? '' : cat)}
+                      style={[
+                        styles.catPill,
+                        {
+                          backgroundColor: isSel ? '#3b82f6' : colors.card,
+                          borderColor: isSel ? '#3b82f6' : colors.cardBorder
+                        }
+                      ]}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: isSel ? '#ffffff' : colors.textMuted }}>
+                        {cat}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 10 }}>
+              Найдено позиций: {filteredRecords.length}
+            </Text>
+
+            {filteredRecords.length === 0 ? (
+              <View style={[styles.emptyCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                <Text style={{ fontSize: 14, color: colors.textMuted }}>Ничего не найдено по вашему запросу</Text>
+              </View>
+            ) : null}
+
             {filteredRecords.map(r => (
               <View key={r.id} style={[styles.partCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <Text style={styles.partToTag}>{r.to_tag || 'ТО'}</Text>
                       <Text style={[styles.partName, { color: colors.text }]}>{r.item_name}</Text>
                     </View>
-                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                      {r.brand || '-'} {r.article ? `• Арт: ${r.article}` : ''}
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+                      Бренд: <Text style={{ color: colors.text, fontWeight: '500' }}>{r.brand || '—'}</Text>
+                      {r.article ? ` • Арт: ${r.article}` : ''}
                     </Text>
-                    <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                      {r.date} • {Number(r.mileage).toLocaleString('ru-RU')} км
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                      📅 {r.date} • 🚗 {Number(r.mileage).toLocaleString('ru-RU')} км • {r.quantity} {r.unit}
                     </Text>
                   </View>
-                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#10b981' }}>
-                    {Number(r.total_price).toLocaleString('ru-RU')} ₽
-                  </Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ fontSize: 15, fontWeight: 'bold', color: colors.success }}>
+                      {Number(r.total_price).toLocaleString('ru-RU')} ₽
+                    </Text>
+                    {r.price_type === 'unit' ? (
+                      <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                        ({Number(r.price_per_unit).toLocaleString('ru-RU')} ₽/{r.unit})
+                      </Text>
+                    ) : null}
+                  </View>
                 </View>
               </View>
             ))}
           </View>
         )}
 
-        {/* TAB 4: SETTINGS */}
+        {/* ======================================================== */}
+        {/* TAB 4: SETTINGS & REGULATIONS                            */}
+        {/* ======================================================== */}
         {activeTab === 'settings' && (
           <View style={styles.tabContent}>
+            {/* Regulations / Trackers Section */}
+            <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={[styles.settingsTitle, { color: colors.text }]}>⚙️ Справочник регламентов</Text>
+                <TouchableOpacity onPress={() => openEditTrackerModal(null)} style={styles.smallAddBtn}>
+                  <Text style={{ fontSize: 11, color: '#fff', fontWeight: 'bold' }}>+ Регламент</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 12 }}>
+                Настройка интервалов замены (км и м/ч) и порогов предупреждения для расчета светофора.
+              </Text>
+
+              {(db.trackers || []).map((tr, idx) => (
+                <View key={tr.id || idx} style={[styles.trackerRow, { borderTopColor: colors.cardBorder }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Text style={{ fontSize: 18 }}>{tr.icon || '⚙️'}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: colors.text }}>{tr.name}</Text>
+                      <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                        Интервал: {tr.interval_km} км {tr.interval_hours > 0 ? `/ ${tr.interval_hours} ч` : ''} • Порог: {tr.warn_km} км
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TouchableOpacity onPress={() => openEditTrackerModal(tr)} style={{ padding: 4 }}>
+                      <Text style={{ fontSize: 14 }}>✏️</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => deleteTracker(tr.id)} style={{ padding: 4 }}>
+                      <Text style={{ fontSize: 14 }}>🗑️</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+
             {/* Password Change Card */}
             <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <Text style={[styles.settingsTitle, { color: colors.text }]}>🔐 Пароль администратора</Text>
               <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 10 }}>
-                Защищает редактирование данных на устройстве
+                Защищает редактирование записей ТО, регламентов и гаража.
               </Text>
               <TextInput
                 style={[styles.settingInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
-                placeholder="Текущий пароль..."
+                placeholder="Текущий пароль (по умолч.: admin)..."
                 placeholderTextColor={colors.textMuted}
                 secureTextEntry
                 value={oldPwd}
@@ -749,24 +1092,38 @@ export default function App() {
               </TouchableOpacity>
             </View>
 
-            {/* Backup Export */}
+            {/* Backup & Export / Import Card */}
             <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-              <Text style={[styles.settingsTitle, { color: colors.text }]}>💾 Резервное копирование</Text>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 10 }}>
-                Экспорт всей базы данных ТО в файл JSON для сохранения или переноса на другое устройство.
+              <Text style={[styles.settingsTitle, { color: colors.text }]}>💾 Резервное копирование и Восстановление</Text>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 12 }}>
+                100% автономное сохранение: экспортируйте базу в файл JSON или восстановите данные на любом устройстве.
               </Text>
-              <TouchableOpacity onPress={exportBackup} style={[styles.saveBtn, { backgroundColor: '#10b981' }]}>
-                <Text style={styles.saveBtnText}>📤 Поделиться / Экспорт бэкапа</Text>
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity onPress={exportBackup} style={[styles.saveBtn, { flex: 1, backgroundColor: '#10b981' }]}>
+                  <Text style={styles.saveBtnText}>📤 Экспорт JSON</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setImportModalVisible(true)} style={[styles.saveBtn, { flex: 1, backgroundColor: '#3b82f6' }]}>
+                  <Text style={styles.saveBtnText}>📥 Импорт JSON</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity onPress={handleResetDb} style={[styles.saveBtn, { backgroundColor: '#ef444415', borderWidth: 1, borderColor: '#ef4444', marginTop: 12 }]}>
+                <Text style={[styles.saveBtnText, { color: '#ef4444' }]}>🔄 Сбросить к заводским данным</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* TAB 5: GARAGE */}
+        {/* ======================================================== */}
+        {/* TAB 5: GARAGE & MULTI-VEHICLE                            */}
+        {/* ======================================================== */}
         {activeTab === 'garage' && (
           <View style={styles.tabContent}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Автомобили в гараже</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+                Мой Гараж ({(db.vehicles || []).length})
+              </Text>
               <TouchableOpacity onPress={() => { fillCarForm(null); setGarageModalVisible(true); }} style={styles.addBtn}>
                 <Text style={styles.addBtnText}>+ Добавить авто</Text>
               </TouchableOpacity>
@@ -774,26 +1131,56 @@ export default function App() {
 
             {(db.vehicles || []).map(v => {
               const isActive = v.id === activeVehicle?.id;
+              const vRecords = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === v.id);
+              const vSpent = vRecords.reduce((sum, r) => sum + (Number(r.total_price) || 0), 0);
+
               return (
                 <TouchableOpacity
                   key={v.id}
                   onPress={() => switchCar(v.id)}
-                  style={[styles.garageCard, { backgroundColor: colors.card, borderColor: isActive ? '#3b82f6' : colors.cardBorder }]}
+                  activeOpacity={0.8}
+                  style={[
+                    styles.garageCard,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: isActive ? '#3b82f6' : colors.cardBorder,
+                      borderWidth: isActive ? 2 : 1
+                    }
+                  ]}
                 >
                   <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={[styles.carNameText, { color: colors.text }]}>{v.name}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <Text style={[styles.carNameText, { color: colors.text, fontSize: 16 }]}>{v.name}</Text>
                       {isActive ? (
                         <View style={styles.activeCarBadge}><Text style={styles.activeCarBadgeText}>АКТИВЕН</Text></View>
                       ) : null}
                     </View>
-                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                      {v.plate || 'Без госномера'} • {Number(v.current_km || 0).toLocaleString('ru-RU')} км
+
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+                      Госномер: <Text style={{ color: colors.text, fontWeight: 'bold' }}>{v.plate || 'Не указан'}</Text>
+                      {v.engine ? ` • ДВС: ${v.engine}` : ''} {v.year ? ` • ${v.year} г.` : ''}
                     </Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                      Пробег: <Text style={{ color: colors.text, fontWeight: '600' }}>{Number(v.current_km || 0).toLocaleString('ru-RU')} км</Text>
+                      {v.current_engine_hours ? ` • ${v.current_engine_hours} м/ч` : ''} • Затраты: {Number(vSpent).toLocaleString('ru-RU')} ₽
+                    </Text>
+                    {v.oil_spec ? (
+                      <Text style={{ fontSize: 10, color: '#f59e0b', marginTop: 3 }}>
+                        🛢️ Допуск масла: {v.oil_spec}
+                      </Text>
+                    ) : null}
                   </View>
-                  <TouchableOpacity onPress={() => { fillCarForm(v); setGarageModalVisible(true); }} style={{ padding: 6 }}>
-                    <Text style={{ fontSize: 16 }}>✏️</Text>
-                  </TouchableOpacity>
+
+                  <View style={{ flexDirection: 'column', gap: 8, marginLeft: 8 }}>
+                    <TouchableOpacity onPress={() => { fillCarForm(v); setGarageModalVisible(true); }} style={styles.circleIconBtn}>
+                      <Text style={{ fontSize: 14 }}>✏️</Text>
+                    </TouchableOpacity>
+                    {(db.vehicles || []).length > 1 ? (
+                      <TouchableOpacity onPress={() => deleteCar(v.id)} style={styles.circleIconBtn}>
+                        <Text style={{ fontSize: 14 }}>🗑️</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 </TouchableOpacity>
               );
             })}
@@ -801,29 +1188,31 @@ export default function App() {
         )}
       </ScrollView>
 
-      {/* --- BOTTOM NAVIGATION BAR --- */}
+      {/* --- BOTTOM NAVIGATION BAR (5 TABS) --- */}
       <View style={[styles.bottomNav, { backgroundColor: colors.card, borderTopColor: colors.cardBorder }]}>
-        <TouchableOpacity onPress={() => setActiveTab('dashboard')} style={styles.navItem}>
+        <TouchableOpacity onPress={() => setActiveTab('dashboard')} style={styles.navItem} activeOpacity={0.7}>
           <Text style={{ fontSize: 18 }}>📊</Text>
           <Text style={[styles.navText, { color: activeTab === 'dashboard' ? '#3b82f6' : colors.textMuted }]}>Статус</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setActiveTab('to-events')} style={styles.navItem}>
+        <TouchableOpacity onPress={() => setActiveTab('to-events')} style={styles.navItem} activeOpacity={0.7}>
           <Text style={{ fontSize: 18 }}>🛠️</Text>
-          <Text style={[styles.navText, { color: activeTab === 'to-events' ? '#3b82f6' : colors.textMuted }]}>ТО ({toGroups.length})</Text>
+          <Text style={[styles.navText, { color: activeTab === 'to-events' ? '#3b82f6' : colors.textMuted }]}>
+            ТО ({toGroups.length})
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setActiveTab('all-parts')} style={styles.navItem}>
+        <TouchableOpacity onPress={() => setActiveTab('all-parts')} style={styles.navItem} activeOpacity={0.7}>
           <Text style={{ fontSize: 18 }}>📋</Text>
           <Text style={[styles.navText, { color: activeTab === 'all-parts' ? '#3b82f6' : colors.textMuted }]}>Детали</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setActiveTab('settings')} style={styles.navItem}>
+        <TouchableOpacity onPress={() => setActiveTab('settings')} style={styles.navItem} activeOpacity={0.7}>
           <Text style={{ fontSize: 18 }}>⚙️</Text>
           <Text style={[styles.navText, { color: activeTab === 'settings' ? '#3b82f6' : colors.textMuted }]}>Настройки</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setActiveTab('garage')} style={styles.navItem}>
+        <TouchableOpacity onPress={() => setActiveTab('garage')} style={styles.navItem} activeOpacity={0.7}>
           <Text style={{ fontSize: 18 }}>🚗</Text>
           <Text style={[styles.navText, { color: activeTab === 'garage' ? '#3b82f6' : colors.textMuted }]}>Гараж</Text>
         </TouchableOpacity>
@@ -835,11 +1224,11 @@ export default function App() {
           <View style={[styles.modalBox, { backgroundColor: colors.card }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>🔒 Режим администратора</Text>
             <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 14 }}>
-              Введите пароль для внесения изменений (по умолчанию: admin):
+              Введите пароль для внесения изменений (по умолчанию: <Text style={{ fontWeight: 'bold' }}>admin</Text>):
             </Text>
             <TextInput
               style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
-              placeholder="Пароль..."
+              placeholder="Пароль администратора..."
               placeholderTextColor={colors.textMuted}
               secureTextEntry
               value={authPassword}
@@ -857,7 +1246,7 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* --- MODAL: UPDATE MILEAGE --- */}
+      {/* --- MODAL: UPDATE MILEAGE (SMART PROTECTION) --- */}
       <Modal visible={mileageModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: colors.card }]}>
@@ -873,20 +1262,24 @@ export default function App() {
 
             {mileageHint && (
               <View style={styles.hintBox}>
-                <Text style={{ fontSize: 11, color: '#d97706', fontWeight: 'bold' }}>⚠️ Внимание: пробег меньше ТО ({mileageHint.lastKm} км)</Text>
-                <Text style={{ fontSize: 10, color: '#b45309', marginTop: 2 }}>
-                  Если вы проехали {mileageHint.num} км после ТО, общий одометр = {mileageHint.combined} км.
+                <Text style={{ fontSize: 11, color: '#d97706', fontWeight: 'bold' }}>
+                  ⚠️ Внимание: введенное значение ({mileageHint.num} км) меньше последнего ТО ({mileageHint.lastKm} км)
+                </Text>
+                <Text style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>
+                  Если вы ввели суточный пробег после ТО, общий одометр = {mileageHint.combined} км ({mileageHint.lastKm} + {mileageHint.num}).
                 </Text>
                 <TouchableOpacity
                   onPress={() => { setInputKm(String(mileageHint.combined)); setMileageHint(null); }}
                   style={styles.hintBtn}
                 >
-                  <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#92400e' }}>Подставить {mileageHint.combined} км</Text>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#92400e' }}>
+                    ➔ Подставить {mileageHint.combined} км
+                  </Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4, marginTop: 10 }}>Текущие моточасы (м/ч):</Text>
+            <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4, marginTop: 12 }}>Текущие моточасы (м/ч):</Text>
             <TextInput
               style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontSize: 16, fontWeight: 'bold' }]}
               keyboardType="numeric"
@@ -906,19 +1299,25 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* --- MODAL: TO EVENT CREATION / EDITING --- */}
+      {/* --- MODAL: ADD / EDIT TO EVENT (DYNAMIC PARTS & PRICE MODES) --- */}
       <Modal visible={toModalVisible} transparent animationType="slide">
         <SafeAreaView style={[styles.fullModalOverlay, { backgroundColor: colors.bg }]}>
           <View style={[styles.fullModalHeader, { backgroundColor: colors.card, borderBottomColor: colors.cardBorder }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
-              {editingToTag ? `Редактирование ${editingToTag}` : 'Создать новое ТО'}
-            </Text>
-            <TouchableOpacity onPress={() => setToModalVisible(false)}>
-              <Text style={{ fontSize: 18, color: colors.textMuted }}>✕</Text>
+            <View>
+              <Text style={[styles.modalTitle, { color: colors.text, marginBottom: 0 }]}>
+                {editingToTag ? `Редактирование ${editingToTag}` : 'Новое Событие ТО'}
+              </Text>
+              <Text style={{ fontSize: 11, color: colors.success, fontWeight: 'bold' }}>
+                Итого ТО: {Number(calculateLiveTOTotal()).toLocaleString('ru-RU')} ₽
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setToModalVisible(false)} style={{ padding: 6 }}>
+              <Text style={{ fontSize: 20, color: colors.textMuted }}>✕</Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={{ flex: 1, padding: 14 }}>
+          <ScrollView style={{ flex: 1, padding: 14 }} showsVerticalScrollIndicator={false}>
+            {/* Header info: Tag, Date, Mileage, Hours */}
             <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Метка ТО:</Text>
@@ -931,12 +1330,12 @@ export default function App() {
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Дата:</Text>
+                <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Дата (ГГГГ-ММ-ДД):</Text>
                 <TextInput
                   style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.cardBorder, color: colors.text }]}
                   value={toDate}
                   onChangeText={setToDate}
-                  placeholder="ГГГГ-ММ-ДД"
+                  placeholder="2026-08-27"
                   placeholderTextColor={colors.textMuted}
                 />
               </View>
@@ -944,7 +1343,7 @@ export default function App() {
 
             <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Пробег (км):</Text>
+                <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Пробег проведения (км):</Text>
                 <TextInput
                   style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.cardBorder, color: colors.text }]}
                   keyboardType="numeric"
@@ -963,70 +1362,136 @@ export default function App() {
               </View>
             </View>
 
-            {/* Dynamic parts list */}
+            {/* Dynamic parts list header */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <Text style={{ fontSize: 13, fontWeight: 'bold', color: colors.text }}>Заменяемые детали ({toParts.length}):</Text>
+              <Text style={{ fontSize: 14, fontWeight: 'bold', color: colors.text }}>Замененные детали ({toParts.length}):</Text>
               <TouchableOpacity onPress={addPartRow} style={styles.smallAddBtn}>
-                <Text style={{ fontSize: 11, color: '#fff', fontWeight: 'bold' }}>+ Добавить деталь</Text>
+                <Text style={{ fontSize: 11, color: '#fff', fontWeight: 'bold' }}>+ Добавить строку</Text>
               </TouchableOpacity>
             </View>
 
-            {toParts.map((p, idx) => (
-              <View key={p.id} style={[styles.partEditCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#3b82f6' }}>Деталь #{idx + 1}</Text>
-                  <TouchableOpacity onPress={() => removePartRow(p.id)}>
-                    <Text style={{ fontSize: 11, color: '#ef4444', fontWeight: 'bold' }}>Удалить</Text>
-                  </TouchableOpacity>
+            {toParts.map((p, idx) => {
+              const qty = parseFloat(p.quantity) || 1;
+              const pr = parseFloat(p.price) || 0;
+              const rowSum = p.price_type === 'unit' ? (pr * qty) : pr;
+
+              return (
+                <View key={p.id} style={[styles.partEditCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: '#3b82f6' }}>Позиция #{idx + 1}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: colors.success }}>
+                        = {Number(rowSum).toLocaleString('ru-RU')} ₽
+                      </Text>
+                      <TouchableOpacity onPress={() => removePartRow(p.id)}>
+                        <Text style={{ fontSize: 11, color: '#ef4444', fontWeight: 'bold' }}>✕ Удалить</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Quick Select from Trackers */}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      {(db.trackers || []).slice(0, 6).map(tr => (
+                        <TouchableOpacity
+                          key={tr.id}
+                          onPress={() => populatePartFromTracker(p.id, tr)}
+                          style={[styles.miniChip, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}
+                        >
+                          <Text style={{ fontSize: 10, color: colors.text }}>{tr.icon} {tr.name}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 6 }]}
+                    placeholder="Наименование детали (например: Масло моторное)..."
+                    placeholderTextColor={colors.textMuted}
+                    value={p.item_name}
+                    onChangeText={(val) => updatePartField(p.id, 'item_name', val)}
+                  />
+
+                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6 }}>
+                    <TextInput
+                      style={[styles.modalInput, { flex: 1, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                      placeholder="Бренд / Марка..."
+                      placeholderTextColor={colors.textMuted}
+                      value={p.brand}
+                      onChangeText={(val) => updatePartField(p.id, 'brand', val)}
+                    />
+                    <TextInput
+                      style={[styles.modalInput, { flex: 1, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                      placeholder="Артикул..."
+                      placeholderTextColor={colors.textMuted}
+                      value={p.article}
+                      onChangeText={(val) => updatePartField(p.id, 'article', val)}
+                    />
+                  </View>
+
+                  {/* Price mode toggle */}
+                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                    <TouchableOpacity
+                      onPress={() => updatePartField(p.id, 'price_type', 'total')}
+                      style={[
+                        styles.priceTypeBtn,
+                        {
+                          backgroundColor: p.price_type === 'total' ? '#3b82f6' : colors.inputBg,
+                          borderColor: p.price_type === 'total' ? '#3b82f6' : colors.inputBorder
+                        }
+                      ]}
+                    >
+                      <Text style={{ fontSize: 10, fontWeight: 'bold', color: p.price_type === 'total' ? '#fff' : colors.textMuted }}>
+                        За всю позицию (комплект)
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => updatePartField(p.id, 'price_type', 'unit')}
+                      style={[
+                        styles.priceTypeBtn,
+                        {
+                          backgroundColor: p.price_type === 'unit' ? '#3b82f6' : colors.inputBg,
+                          borderColor: p.price_type === 'unit' ? '#3b82f6' : colors.inputBorder
+                        }
+                      ]}
+                    >
+                      <Text style={{ fontSize: 10, fontWeight: 'bold', color: p.price_type === 'unit' ? '#fff' : colors.textMuted }}>
+                        За 1 ед. (литр / шт)
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TextInput
+                      style={[styles.modalInput, { flex: 1, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                      placeholder="Кол-во"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="numeric"
+                      value={String(p.quantity)}
+                      onChangeText={(val) => updatePartField(p.id, 'quantity', val)}
+                    />
+                    <TextInput
+                      style={[styles.modalInput, { flex: 1, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                      placeholder="Ед. (л, шт)"
+                      placeholderTextColor={colors.textMuted}
+                      value={p.unit}
+                      onChangeText={(val) => updatePartField(p.id, 'unit', val)}
+                    />
+                    <TextInput
+                      style={[styles.modalInput, { flex: 1.5, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontWeight: 'bold' }]}
+                      placeholder="Цена (₽)"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="numeric"
+                      value={String(p.price)}
+                      onChangeText={(val) => updatePartField(p.id, 'price', val)}
+                    />
+                  </View>
                 </View>
+              );
+            })}
 
-                <TextInput
-                  style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 6 }]}
-                  placeholder="Наименование детали (например: Масло моторное)..."
-                  placeholderTextColor={colors.textMuted}
-                  value={p.item_name}
-                  onChangeText={(val) => updatePartField(p.id, 'item_name', val)}
-                />
-
-                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6 }}>
-                  <TextInput
-                    style={[styles.modalInput, { flex: 1, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
-                    placeholder="Бренд / Марка..."
-                    placeholderTextColor={colors.textMuted}
-                    value={p.brand}
-                    onChangeText={(val) => updatePartField(p.id, 'brand', val)}
-                  />
-                  <TextInput
-                    style={[styles.modalInput, { flex: 1, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
-                    placeholder="Артикул..."
-                    placeholderTextColor={colors.textMuted}
-                    value={p.article}
-                    onChangeText={(val) => updatePartField(p.id, 'article', val)}
-                  />
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <TextInput
-                    style={[styles.modalInput, { flex: 1, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
-                    placeholder="Кол-во"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="numeric"
-                    value={String(p.quantity)}
-                    onChangeText={(val) => updatePartField(p.id, 'quantity', val)}
-                  />
-                  <TextInput
-                    style={[styles.modalInput, { flex: 1.5, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontWeight: 'bold' }]}
-                    placeholder="Сумма (₽)"
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="numeric"
-                    value={String(p.price)}
-                    onChangeText={(val) => updatePartField(p.id, 'price', val)}
-                  />
-                </View>
-              </View>
-            ))}
-
-            <View style={{ height: 20 }} />
+            <View style={{ height: 30 }} />
           </ScrollView>
 
           <View style={[styles.fullModalFooter, { backgroundColor: colors.card, borderTopColor: colors.cardBorder }]}>
@@ -1048,7 +1513,7 @@ export default function App() {
               {editCarId ? 'Редактировать автомобиль' : 'Добавить автомобиль в гараж'}
             </Text>
 
-            <ScrollView style={{ marginVertical: 10 }}>
+            <ScrollView style={{ marginVertical: 10 }} showsVerticalScrollIndicator={false}>
               <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Марка:</Text>
               <TextInput
                 style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
@@ -1081,7 +1546,26 @@ export default function App() {
                 style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
                 value={carEngine}
                 onChangeText={setCarEngine}
-                placeholder="1.5T 7DCT 181 л.с."
+                placeholder="1.5T 7DCT"
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Год выпуска:</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
+                keyboardType="numeric"
+                value={carYear}
+                onChangeText={setCarYear}
+                placeholder="2023"
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>VIN номер (необязательно):</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
+                value={carVin}
+                onChangeText={setCarVin}
+                placeholder="LS6A2..."
                 placeholderTextColor={colors.textMuted}
               />
 
@@ -1101,6 +1585,156 @@ export default function App() {
               </TouchableOpacity>
               <TouchableOpacity onPress={saveCarProfile} style={styles.modalConfirmBtn}>
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Сохранить</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* --- MODAL: TRACKER / REGULATION EDIT --- */}
+      <Modal visible={trackerModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { backgroundColor: colors.card, maxHeight: '85%' }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              {editingTrackerId ? 'Редактировать регламент' : 'Добавить регламент'}
+            </Text>
+
+            <ScrollView style={{ marginVertical: 10 }} showsVerticalScrollIndicator={false}>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Иконка (эмодзи):</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
+                value={trIcon}
+                onChangeText={setTrIcon}
+                placeholder="🛢️"
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Наименование:</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
+                value={trName}
+                onChangeText={setTrName}
+                placeholder="Масло моторное (0W-20)..."
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Категория:</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
+                value={trCategory}
+                onChangeText={setTrCategory}
+                placeholder="Двигатель / Фильтры..."
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Интервал (км):</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    keyboardType="numeric"
+                    value={trKm}
+                    onChangeText={setTrKm}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Интервал (м/ч):</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    keyboardType="numeric"
+                    value={trHours}
+                    onChangeText={setTrHours}
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Порог желтого (км):</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    keyboardType="numeric"
+                    value={trWarnKm}
+                    onChangeText={setTrWarnKm}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Порог (м/ч):</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    keyboardType="numeric"
+                    value={trWarnHours}
+                    onChangeText={setTrWarnHours}
+                  />
+                </View>
+              </View>
+
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Бренд по умолчанию:</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
+                value={trBrand}
+                onChangeText={setTrBrand}
+                placeholder="Лукойл Genesis JP..."
+                placeholderTextColor={colors.textMuted}
+              />
+
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Артикул:</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
+                value={trArticle}
+                onChangeText={setTrArticle}
+                placeholder="1658134508"
+                placeholderTextColor={colors.textMuted}
+              />
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setTrackerModalVisible(false)} style={styles.modalCancelBtn}>
+                <Text style={{ color: colors.textMuted, fontWeight: 'bold' }}>Отмена</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={saveTracker} style={styles.modalConfirmBtn}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Сохранить</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* --- MODAL: IMPORT JSON BACKUP --- */}
+      <Modal visible={importModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { backgroundColor: colors.card, maxHeight: '85%' }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>📥 Импорт базы данных JSON</Text>
+            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 10 }}>
+              Вставьте текст резервной копии JSON ниже для восстановления базы данных:
+            </Text>
+
+            <TextInput
+              style={[
+                styles.modalInput,
+                {
+                  backgroundColor: colors.inputBg,
+                  borderColor: colors.inputBorder,
+                  color: colors.text,
+                  height: 150,
+                  textAlignVertical: 'top',
+                  fontFamily: 'monospace',
+                  fontSize: 11
+                }
+              ]}
+              multiline
+              placeholder='{"active_vehicle_id": "car_1", "vehicles": [...] ...}'
+              placeholderTextColor={colors.textMuted}
+              value={importJsonText}
+              onChangeText={setImportJsonText}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setImportModalVisible(false)} style={styles.modalCancelBtn}>
+                <Text style={{ color: colors.textMuted, fontWeight: 'bold' }}>Отмена</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleImportBackup} style={[styles.modalConfirmBtn, { backgroundColor: '#10b981' }]}>
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Восстановить</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1129,8 +1763,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   carIconBox: {
-    width: 36,
-    height: 36,
+    width: 38,
+    height: 38,
     borderRadius: 10,
     backgroundColor: '#2563eb',
     alignItems: 'center',
@@ -1147,7 +1781,7 @@ const styles = StyleSheet.create({
   plateBadge: {
     backgroundColor: '#fef08a',
     paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingVertical: 1,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#fde047',
@@ -1156,7 +1790,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: 'bold',
     color: '#854d0e',
-    fontFamily: 'monospace',
   },
   headerRight: {
     flexDirection: 'row',
@@ -1183,7 +1816,7 @@ const styles = StyleSheet.create({
   kpiGrid: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   kpiCard: {
     flex: 1,
@@ -1217,10 +1850,30 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: '500',
   },
+  infoBanner: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
   sectionTitle: {
     fontSize: 14,
     fontWeight: 'bold',
     marginBottom: 10,
+  },
+  attentionPill: {
+    backgroundColor: '#f59e0b15',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#f59e0b40',
+  },
+  attentionPillText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#f59e0b',
   },
   consumableCard: {
     padding: 14,
@@ -1270,6 +1923,9 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
   },
+  lastReplacedRow: {
+    marginTop: 6,
+  },
   bottomNav: {
     position: 'absolute',
     bottom: 0,
@@ -1282,7 +1938,7 @@ const styles = StyleSheet.create({
   },
   navItem: {
     alignItems: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
   },
   navText: {
     fontSize: 10,
@@ -1330,9 +1986,9 @@ const styles = StyleSheet.create({
   },
   hintBox: {
     backgroundColor: '#fef3c7',
-    padding: 8,
+    padding: 10,
     borderRadius: 8,
-    marginTop: 6,
+    marginTop: 8,
   },
   hintBtn: {
     backgroundColor: '#fde68a',
@@ -1420,13 +2076,19 @@ const styles = StyleSheet.create({
     color: '#2563eb',
     fontSize: 10,
     fontWeight: 'bold',
-    paddingHorizontal: 5,
-    paddingVertical: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: 4,
   },
   partName: {
     fontSize: 13,
     fontWeight: 'bold',
+  },
+  catPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
   },
   searchInput: {
     borderWidth: 1,
@@ -1434,7 +2096,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 13,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   settingsCard: {
     padding: 16,
@@ -1472,8 +2134,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 14,
-    borderRadius: 12,
-    borderWidth: 1.5,
+    borderRadius: 14,
     marginBottom: 10,
   },
   activeCarBadge: {
@@ -1513,9 +2174,45 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   partEditCard: {
-    padding: 10,
-    borderRadius: 10,
+    padding: 12,
+    borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 8,
+    marginBottom: 10,
+  },
+  miniChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  priceTypeBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  trackerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderTopWidth: 1,
+  },
+  circleIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2563eb15',
+  },
+  emptyCard: {
+    padding: 24,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   }
 });
+

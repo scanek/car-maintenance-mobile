@@ -45,21 +45,23 @@
 
 ---
 
-## 🚀 Сборка APK-файла
+## 🚀 Способы сборки автономного APK
 
-### Способ 1: Сборка APK в облаке через Expo EAS (Рекомендуемый)
-
-```bash
-npm run build:apk
-```
-После завершения перейдите по ссылке или в панель:  
-👉 **[https://expo.dev/accounts/scanek_dev/projects/car-maintenance-app/builds](https://expo.dev/accounts/scanek_dev/projects/car-maintenance-app/builds)**  
-и скачайте готовый файл **`.apk`** на ваш Android-смартфон.
+### Способ 1: Автоматическая сборка в GitHub Actions (Бесплатно, без лимитов Expo)
+В репозитории настроен готовый GitHub Actions workflow `.github/workflows/build-apk.yml`.
+1. Сделайте `git push` в ветку `main` или запустите вручную в разделе **Actions** -> **Build Android APK** -> **Run workflow**.
+2. По завершению перейдите во вкладку **Artifacts** и скачайте готовый `app-release.apk`.
 
 ---
 
-### Способ 2: Локальная сборка на ПК (Windows)
+### Способ 2: Сборка в облаке через Expo EAS
+```bash
+npm run build:apk
+```
 
+---
+
+### Способ 3: Локальная сборка на ПК (Windows / Android Studio)
 1. **В 1 клик:** запустите файл `build_apk_local.bat` в папке проекта.
 2. **Через консоль:**
    ```bash
