@@ -18,7 +18,9 @@ import {
   resetDatabase,
   getActiveVehicle,
   calculateDashboardStatus,
-  getTOGroups
+  getTOGroups,
+  DEFAULT_CLEAN_DB,
+  DEMO_DB
 } from './src/storage';
 
 export default function App() {
@@ -26,6 +28,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'to-events', 'all-parts', 'settings', 'garage'
   const [theme, setTheme] = useState('dark');
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // Onboarding Wizard Modal
+  const [onboardingModalVisible, setOnboardingModalVisible] = useState(false);
+  const [obBrand, setObBrand] = useState('');
+  const [obModel, setObModel] = useState('');
+  const [obPlate, setObPlate] = useState('');
+  const [obYear, setObYear] = useState(String(new Date().getFullYear()));
+  const [obEngine, setObEngine] = useState('');
+  const [obKm, setObKm] = useState('0');
+  const [obHours, setObHours] = useState('0');
+  const [obOil, setObOil] = useState('');
 
   // Modals state
   const [authModalVisible, setAuthModalVisible] = useState(false);
@@ -93,6 +106,20 @@ export default function App() {
     const loaded = await loadDatabase();
     setDb(loaded);
     if (loaded && loaded.theme) setTheme(loaded.theme);
+
+    // Show initial car setup wizard if not onboarded yet
+    if (!loaded || loaded.is_onboarded === false) {
+      const v = (loaded && loaded.vehicles && loaded.vehicles[0]) || {};
+      setObBrand(v.brand || '');
+      setObModel(v.model || '');
+      setObPlate(v.plate || '');
+      setObYear(v.year ? String(v.year) : String(new Date().getFullYear()));
+      setObEngine(v.engine || '');
+      setObKm(v.current_km ? String(v.current_km) : '0');
+      setObHours(v.current_engine_hours ? String(v.current_engine_hours) : '0');
+      setObOil(v.oil_spec || '');
+      setOnboardingModalVisible(true);
+    }
   };
 
   const updateDb = async (newDb) => {
@@ -132,6 +159,81 @@ export default function App() {
     }
   };
 
+  // --- ONBOARDING / NEW CAR WIZARD HANDLERS ---
+  const saveOnboarding = () => {
+    const name = obBrand.trim() && obModel.trim() ? (obBrand.trim() + ' ' + obModel.trim()) : (obBrand.trim() || obModel.trim() || 'Мой автомобиль');
+    const kmNum = parseInt(obKm, 10) || 0;
+    const hoursNum = parseInt(obHours, 10) || 0;
+    const yearNum = parseInt(obYear, 10) || new Date().getFullYear();
+
+    const currentV = getActiveVehicle(db) || {};
+    const updatedVehicle = {
+      ...currentV,
+      id: currentV.id || 'car_1',
+      name: name,
+      brand: obBrand.trim(),
+      model: obModel.trim(),
+      plate: obPlate.trim(),
+      engine: obEngine.trim(),
+      year: yearNum,
+      current_km: kmNum,
+      current_engine_hours: hoursNum,
+      oil_spec: obOil.trim()
+    };
+
+    const newDb = {
+      ...db,
+      is_onboarded: true,
+      active_vehicle_id: updatedVehicle.id,
+      vehicles: [updatedVehicle],
+      maintenance_records: db?.maintenance_records || []
+    };
+
+    updateDb(newDb);
+    setOnboardingModalVisible(false);
+    Alert.alert('Успешно', 'Автомобиль ' + name + ' готов к учету!');
+  };
+
+  const handleLoadDemo = () => {
+    Alert.alert('Загрузка демо-данных', 'Загрузить тестовый автомобиль Changan CS55 Plus с историей ТО-2 и ТО-3?', [
+      { text: 'Отмена', style: 'cancel' },
+      {
+        text: 'Загрузить',
+        onPress: async () => {
+          const demo = await resetDatabase('demo');
+          setDb(demo);
+          setOnboardingModalVisible(false);
+          Alert.alert('Готово', 'Демо-данные Changan CS55 Plus успешно загружены!');
+        }
+      }
+    ]);
+  };
+
+  const handleResetToClean0 = () => {
+    requireAuth(() => {
+      Alert.alert('Настройка нового авто с 0', 'Сбросить все данные в 0 и настроить новый автомобиль?', [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Настроить новый авто',
+          style: 'destructive',
+          onPress: async () => {
+            const clean = await resetDatabase('clean');
+            setDb(clean);
+            setObBrand('');
+            setObModel('');
+            setObPlate('');
+            setObYear(String(new Date().getFullYear()));
+            setObEngine('');
+            setObKm('0');
+            setObHours('0');
+            setObOil('');
+            setOnboardingModalVisible(true);
+          }
+        }
+      ]);
+    });
+  };
+
   if (!db) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center' }]}>
@@ -167,8 +269,8 @@ export default function App() {
     const lastKm = records.reduce((max, r) => Math.max(max, Number(r.mileage) || 0), 0);
     const lastH = records.reduce((max, r) => Math.max(max, Number(r.engine_hours) || 0), 0);
 
-    setInputKm(String(activeVehicle?.current_km || lastKm || 25340));
-    setInputHours(String(activeVehicle?.current_engine_hours || lastH || 772));
+    setInputKm(String(activeVehicle?.current_km || lastKm || 0));
+    setInputHours(String(activeVehicle?.current_engine_hours || lastH || 0));
     setMileageHint(null);
     setMileageModalVisible(true);
   };
@@ -209,24 +311,24 @@ export default function App() {
     requireAuth(() => {
       setEditingToTag('');
       const nextNum = toGroups.length + 1;
-      setToTag(`ТО-${nextNum}`);
+      setToTag('ТО-' + nextNum);
       setToDate(new Date().toISOString().split('T')[0]);
-      setToKm(String(activeVehicle?.current_km || 25340));
-      setToHours(String(activeVehicle?.current_engine_hours || 772));
+      setToKm(String(activeVehicle?.current_km || 0));
+      setToHours(String(activeVehicle?.current_engine_hours || 0));
       setToParts([
         {
           id: Date.now(),
           category: 'Двигатель',
-          item_name: 'Масло моторное (0W-20)',
-          brand: 'Лукойл Genesis JP',
-          article: '1658134508',
-          quantity: '4.5',
+          item_name: 'Масло моторное',
+          brand: '',
+          article: '',
+          quantity: '4',
           unit: 'л',
-          price_type: 'total', // 'total' (за позицию) или 'unit' (за 1 ед.)
-          price: '3600',
+          price_type: 'total',
+          price: '',
           interval_km: '7500',
           interval_hours: '250',
-          store: 'Ozon'
+          store: ''
         }
       ]);
       setToModalVisible(true);
@@ -271,9 +373,9 @@ export default function App() {
         unit: 'шт',
         price_type: 'total',
         price: '',
-        interval_km: '7500',
+        interval_km: '10000',
         interval_hours: '250',
-        store: 'Ozon'
+        store: ''
       }
     ]);
   };
@@ -314,7 +416,7 @@ export default function App() {
 
   const saveTOEvent = () => {
     if (!toTag.trim()) {
-      Alert.alert('Ошибка', 'Введите название ТО (например: ТО-4)');
+      Alert.alert('Ошибка', 'Введите название ТО (например: ТО-1)');
       return;
     }
     if (toParts.length === 0) {
@@ -385,12 +487,12 @@ export default function App() {
     });
 
     setToModalVisible(false);
-    Alert.alert('Успешно', `Событие ${toTag} сохранено!`);
+    Alert.alert('Успешно', 'Событие ' + toTag + ' сохранено!');
   };
 
   const deleteTOEvent = (tag) => {
     requireAuth(() => {
-      Alert.alert('Удаление ТО', `Вы уверены, что хотите удалить ${tag} и все детали внутри?`, [
+      Alert.alert('Удаление ТО', 'Вы уверены, что хотите удалить ' + tag + ' и все детали внутри?', [
         { text: 'Отмена', style: 'cancel' },
         {
           text: 'Удалить',
@@ -399,7 +501,7 @@ export default function App() {
             const vId = activeVehicle.id;
             const updated = (db.maintenance_records || []).filter(r => !(r.vehicle_id === vId && r.to_tag === tag));
             updateDb({ ...db, maintenance_records: updated });
-            Alert.alert('Удалено', `Событие ${tag} удалено`);
+            Alert.alert('Удалено', 'Событие ' + tag + ' удалено');
           }
         }
       ]);
@@ -423,7 +525,7 @@ export default function App() {
       setCarModel('');
       setCarPlate('');
       setCarEngine('');
-      setCarYear('');
+      setCarYear(String(new Date().getFullYear()));
       setCarVin('');
       setCarOil('');
     }
@@ -431,18 +533,20 @@ export default function App() {
 
   const saveCarProfile = () => {
     requireAuth(() => {
-      if (!carBrand.trim() || !carModel.trim()) {
-        Alert.alert('Ошибка', 'Укажите марку и модель автомобиля');
+      if (!carBrand.trim() && !carModel.trim()) {
+        Alert.alert('Ошибка', 'Укажите марку или модель автомобиля');
         return;
       }
 
       let vehicles = [...(db.vehicles || [])];
+      const displayName = carBrand.trim() && carModel.trim() ? (carBrand.trim() + ' ' + carModel.trim()) : (carBrand.trim() || carModel.trim() || 'Автомобиль');
+
       if (editCarId) {
         vehicles = vehicles.map(v => v.id === editCarId ? {
           ...v,
           brand: carBrand.trim(),
           model: carModel.trim(),
-          name: `${carBrand.trim()} ${carModel.trim()}`,
+          name: displayName,
           plate: carPlate.trim(),
           engine: carEngine.trim(),
           year: parseInt(carYear, 10) || null,
@@ -450,12 +554,12 @@ export default function App() {
           oil_spec: carOil.trim()
         } : v);
       } else {
-        const newId = `car_${Date.now()}`;
+        const newId = 'car_' + Date.now();
         const newCar = {
           id: newId,
           brand: carBrand.trim(),
           model: carModel.trim(),
-          name: `${carBrand.trim()} ${carModel.trim()}`,
+          name: displayName,
           plate: carPlate.trim(),
           engine: carEngine.trim(),
           year: parseInt(carYear, 10) || null,
@@ -570,7 +674,7 @@ export default function App() {
         } : t);
       } else {
         trackers.push({
-          id: `tr_${Date.now()}`,
+          id: 'tr_' + Date.now(),
           name: trName.trim(),
           category: trCategory.trim(),
           match: trMatch.trim() || trName.trim().toLowerCase(),
@@ -615,7 +719,7 @@ export default function App() {
       const jsonStr = JSON.stringify(db, null, 2);
       await Share.share({
         message: jsonStr,
-        title: `car_maintenance_backup_${new Date().toISOString().split('T')[0]}.json`
+        title: 'car_maintenance_backup_' + new Date().toISOString().split('T')[0] + '.json'
       });
     } catch (e) {
       Alert.alert('Ошибка экспорта', e.message);
@@ -637,23 +741,6 @@ export default function App() {
       } catch (e) {
         Alert.alert('Ошибка парсинга', 'Введен некорректный JSON текст');
       }
-    });
-  };
-
-  const handleResetDb = () => {
-    requireAuth(() => {
-      Alert.alert('Сброс базы данных', 'Сбросить все данные к исходным заводским настройкам (Changan CS55 Plus, ТО-2, ТО-3)?', [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Сбросить',
-          style: 'destructive',
-          onPress: async () => {
-            const fresh = await resetDatabase();
-            setDb(fresh);
-            Alert.alert('Сброшено', 'База данных сброшена к исходным значениям');
-          }
-        }
-      ]);
     });
   };
 
@@ -708,7 +795,7 @@ export default function App() {
               ) : null}
             </View>
             <Text style={[styles.carSubText, { color: colors.textMuted }]}>
-              {activeVehicle?.engine || '1.5T 7DCT'} • {Number(activeVehicle?.current_km || 0).toLocaleString('ru-RU')} км
+              {activeVehicle?.engine || 'Автомобиль'} • {Number(activeVehicle?.current_km || 0).toLocaleString('ru-RU')} км
             </Text>
           </View>
         </TouchableOpacity>
@@ -781,14 +868,26 @@ export default function App() {
               </View>
             ) : null}
 
+            {/* Setup vehicle prompt if fresh clean car */}
+            {!activeVehicle?.brand && (
+              <TouchableOpacity
+                onPress={() => setOnboardingModalVisible(true)}
+                style={[styles.infoBanner, { backgroundColor: '#3b82f615', borderColor: '#3b82f640', marginBottom: 12 }]}
+              >
+                <Text style={{ fontSize: 12, color: '#3b82f6', fontWeight: 'bold' }}>
+                  ⚙️ Нажмите сюда, чтобы настроить параметры вашего автомобиля
+                </Text>
+              </TouchableOpacity>
+            )}
+
             {/* Traffic-Light Status Section Header */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, marginTop: 6 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, marginTop: 4 }}>
               <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
                 Ресурс расходников («Светофор»)
               </Text>
               <View style={styles.attentionPill}>
                 <Text style={styles.attentionPillText}>
-                  {statusData.kpi.attention_count > 0 ? `⚠️ Внимание: ${statusData.kpi.attention_count}` : '✅ Всё в норме'}
+                  {statusData.kpi.attention_count > 0 ? ('⚠️ Внимание: ' + statusData.kpi.attention_count) : '✅ Всё в норме'}
                 </Text>
               </View>
             </View>
@@ -809,7 +908,7 @@ export default function App() {
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.consumableTitle, { color: colors.text }]}>{c.name}</Text>
                         <Text style={[styles.consumableSub, { color: colors.textMuted }]}>
-                          {c.brand} {c.article ? `• ${c.article}` : ''}
+                          {c.brand ? (c.brand + ' ') : ''}{c.article ? ('• ' + c.article) : ''}
                         </Text>
                       </View>
                     </View>
@@ -824,12 +923,12 @@ export default function App() {
                   <View style={styles.progressContainer}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
                       <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                        Износ ресурса ({c.interval_km} км {c.interval_hours > 0 ? `/ ${c.interval_hours} ч` : ''}):
+                        Износ ресурса ({c.interval_km} км {c.interval_hours > 0 ? ('/ ' + c.interval_hours + ' ч') : ''}):
                       </Text>
                       <Text style={{ fontSize: 12, fontWeight: 'bold', color: badgeColor }}>{c.wear_percent}%</Text>
                     </View>
                     <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#0b1120' : '#e2e8f0' }]}>
-                      <View style={[styles.progressBarFill, { width: `${Math.min(100, c.wear_percent)}%`, backgroundColor: barColor }]} />
+                      <View style={[styles.progressBarFill, { width: Math.min(100, c.wear_percent) + '%', backgroundColor: barColor }]} />
                     </View>
                   </View>
 
@@ -838,13 +937,13 @@ export default function App() {
                     <View>
                       <Text style={{ fontSize: 10, color: colors.textMuted }}>Осталось до замены:</Text>
                       <Text style={{ fontSize: 13, fontWeight: 'bold', color: badgeColor }}>
-                        {Number(c.rem_km).toLocaleString('ru-RU')} км {c.rem_hours !== null ? `(${c.rem_hours} м/ч)` : ''}
+                        {Number(c.rem_km).toLocaleString('ru-RU')} км {c.rem_hours !== null ? ('(' + c.rem_hours + ' м/ч)') : ''}
                       </Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={{ fontSize: 10, color: colors.textMuted }}>Замена на одометре:</Text>
                       <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text }}>
-                        {Number(c.next_km).toLocaleString('ru-RU')} км {c.next_hours ? `(${c.next_hours} м/ч)` : ''}
+                        {Number(c.next_km).toLocaleString('ru-RU')} км {c.next_hours ? ('(' + c.next_hours + ' м/ч)') : ''}
                       </Text>
                     </View>
                   </View>
@@ -919,7 +1018,7 @@ export default function App() {
                       <View style={{ flex: 1, paddingRight: 8 }}>
                         <Text style={[styles.toPartName, { color: colors.text }]}>• {p.item_name}</Text>
                         <Text style={{ fontSize: 10, color: colors.textMuted }}>
-                          {p.brand} {p.article ? `[${p.article}]` : ''} • {p.quantity} {p.unit}
+                          {p.brand} {p.article ? ('[' + p.article + ']') : ''} • {p.quantity} {p.unit}
                         </Text>
                       </View>
                       <Text style={[styles.toPartPrice, { color: colors.success }]}>
@@ -951,7 +1050,7 @@ export default function App() {
             {/* Search Input */}
             <TextInput
               style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.cardBorder, color: colors.text }]}
-              placeholder="🔍 Поиск по названию, бренду (Лукойл, VIC, ZIC), артикулу..."
+              placeholder="🔍 Поиск по названию, бренду, артикулу..."
               placeholderTextColor={colors.textMuted}
               value={searchTerm}
               onChangeText={setSearchTerm}
@@ -1003,7 +1102,7 @@ export default function App() {
                     </View>
                     <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
                       Бренд: <Text style={{ color: colors.text, fontWeight: '500' }}>{r.brand || '—'}</Text>
-                      {r.article ? ` • Арт: ${r.article}` : ''}
+                      {r.article ? (' • Арт: ' + r.article) : ''}
                     </Text>
                     <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
                       📅 {r.date} • 🚗 {Number(r.mileage).toLocaleString('ru-RU')} км • {r.quantity} {r.unit}
@@ -1030,6 +1129,22 @@ export default function App() {
         {/* ======================================================== */}
         {activeTab === 'settings' && (
           <View style={styles.tabContent}>
+            {/* Quick Initial Setup / Demo actions */}
+            <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+              <Text style={[styles.settingsTitle, { color: colors.text }]}>🚗 Настройка автомобиля и Данные</Text>
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 12 }}>
+                Настройте свой автомобиль с нуля или загрузите демонстрационные данные для ознакомления.
+              </Text>
+              <View style={{ flexDirection: 'column', gap: 8 }}>
+                <TouchableOpacity onPress={handleResetToClean0} style={[styles.saveBtn, { backgroundColor: '#3b82f6' }]}>
+                  <Text style={styles.saveBtnText}>🆕 Настроить новый авто (Очистить в 0)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleLoadDemo} style={[styles.saveBtn, { backgroundColor: '#2563eb15', borderWidth: 1, borderColor: '#3b82f6' }]}>
+                  <Text style={[styles.saveBtnText, { color: '#3b82f6' }]}>📦 Загрузить демо-данные (Changan)</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             {/* Regulations / Trackers Section */}
             <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -1049,7 +1164,7 @@ export default function App() {
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 12, fontWeight: 'bold', color: colors.text }}>{tr.name}</Text>
                       <Text style={{ fontSize: 10, color: colors.textMuted }}>
-                        Интервал: {tr.interval_km} км {tr.interval_hours > 0 ? `/ ${tr.interval_hours} ч` : ''} • Порог: {tr.warn_km} км
+                        Интервал: {tr.interval_km} км {tr.interval_hours > 0 ? ('/ ' + tr.interval_hours + ' ч') : ''} • Порог: {tr.warn_km} км
                       </Text>
                     </View>
                   </View>
@@ -1107,10 +1222,6 @@ export default function App() {
                   <Text style={styles.saveBtnText}>📥 Импорт JSON</Text>
                 </TouchableOpacity>
               </View>
-
-              <TouchableOpacity onPress={handleResetDb} style={[styles.saveBtn, { backgroundColor: '#ef444415', borderWidth: 1, borderColor: '#ef4444', marginTop: 12 }]}>
-                <Text style={[styles.saveBtnText, { color: '#ef4444' }]}>🔄 Сбросить к заводским данным</Text>
-              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -1158,11 +1269,11 @@ export default function App() {
 
                     <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
                       Госномер: <Text style={{ color: colors.text, fontWeight: 'bold' }}>{v.plate || 'Не указан'}</Text>
-                      {v.engine ? ` • ДВС: ${v.engine}` : ''} {v.year ? ` • ${v.year} г.` : ''}
+                      {v.engine ? (' • ДВС: ' + v.engine) : ''} {v.year ? (' • ' + v.year + ' г.') : ''}
                     </Text>
                     <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
                       Пробег: <Text style={{ color: colors.text, fontWeight: '600' }}>{Number(v.current_km || 0).toLocaleString('ru-RU')} км</Text>
-                      {v.current_engine_hours ? ` • ${v.current_engine_hours} м/ч` : ''} • Затраты: {Number(vSpent).toLocaleString('ru-RU')} ₽
+                      {v.current_engine_hours ? (' • ' + v.current_engine_hours + ' м/ч') : ''} • Затраты: {Number(vSpent).toLocaleString('ru-RU')} ₽
                     </Text>
                     {v.oil_spec ? (
                       <Text style={{ fontSize: 10, color: '#f59e0b', marginTop: 3 }}>
@@ -1218,6 +1329,120 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
+      {/* --- MODAL: INITIAL ONBOARDING / SETUP NEW CAR --- */}
+      <Modal visible={onboardingModalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { backgroundColor: colors.card, maxHeight: '90%' }]}>
+            <Text style={[styles.modalTitle, { color: colors.text, fontSize: 18 }]}>🚗 Настройка автомобиля</Text>
+            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12 }}>
+              Введите данные вашего авто для начала автономного учета и контроля ресурса расходников:
+            </Text>
+
+            <ScrollView style={{ marginVertical: 6 }} showsVerticalScrollIndicator={false}>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Марка:</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    placeholder="Changan, Toyota..."
+                    placeholderTextColor={colors.textMuted}
+                    value={obBrand}
+                    onChangeText={setObBrand}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Модель:</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    placeholder="CS55 Plus, RAV4..."
+                    placeholderTextColor={colors.textMuted}
+                    value={obModel}
+                    onChangeText={setObModel}
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Госномер:</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    placeholder="А 777 АА 777"
+                    placeholderTextColor={colors.textMuted}
+                    value={obPlate}
+                    onChangeText={setObPlate}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Год выпуска:</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    keyboardType="numeric"
+                    placeholder="2024"
+                    placeholderTextColor={colors.textMuted}
+                    value={obYear}
+                    onChangeText={setObYear}
+                  />
+                </View>
+              </View>
+
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Двигатель / Модификация:</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
+                placeholder="1.5T 7DCT / 2.0 MT..."
+                placeholderTextColor={colors.textMuted}
+                value={obEngine}
+                onChangeText={setObEngine}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Текущий пробег (км):</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontWeight: 'bold' }]}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    value={obKm}
+                    onChangeText={setObKm}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Моточасы (м/ч):</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontWeight: 'bold' }]}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    value={obHours}
+                    onChangeText={setObHours}
+                  />
+                </View>
+              </View>
+
+              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Допуск моторного масла / Объем:</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 12 }]}
+                placeholder="SAE 0W-20 SP / C5 (4.2-4.5 л)..."
+                placeholderTextColor={colors.textMuted}
+                value={obOil}
+                onChangeText={setObOil}
+              />
+
+              <TouchableOpacity onPress={saveOnboarding} style={[styles.saveBtn, { backgroundColor: '#10b981', paddingVertical: 12 }]}>
+                <Text style={[styles.saveBtnText, { fontSize: 14 }]}>🚀 Начать учет (Все с 0)</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={handleLoadDemo} style={{ marginTop: 12, paddingVertical: 8, alignItems: 'center' }}>
+                <Text style={{ fontSize: 11, color: '#3b82f6', textDecorationLine: 'underline' }}>
+                  Или загрузить демо-данные (Changan CS55 Plus, ТО-2, ТО-3)
+                </Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* --- MODAL: ADMIN PASSWORD --- */}
       <Modal visible={authModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -1263,17 +1488,17 @@ export default function App() {
             {mileageHint && (
               <View style={styles.hintBox}>
                 <Text style={{ fontSize: 11, color: '#d97706', fontWeight: 'bold' }}>
-                  ⚠️ Внимание: введенное значение ({mileageHint.num} км) меньше последнего ТО ({mileageHint.lastKm} км)
+                  ⚠️ Внимание: введенное значение (' + mileageHint.num + ' км) меньше последнего ТО (' + mileageHint.lastKm + ' км)
                 </Text>
                 <Text style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>
-                  Если вы ввели суточный пробег после ТО, общий одометр = {mileageHint.combined} км ({mileageHint.lastKm} + {mileageHint.num}).
+                  Если вы ввели суточный пробег после ТО, общий одометр = ' + mileageHint.combined + ' км (' + mileageHint.lastKm + ' + ' + mileageHint.num + ').
                 </Text>
                 <TouchableOpacity
                   onPress={() => { setInputKm(String(mileageHint.combined)); setMileageHint(null); }}
                   style={styles.hintBtn}
                 >
                   <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#92400e' }}>
-                    ➔ Подставить {mileageHint.combined} км
+                    ➔ Подставить ' + mileageHint.combined + ' км
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -1305,7 +1530,7 @@ export default function App() {
           <View style={[styles.fullModalHeader, { backgroundColor: colors.card, borderBottomColor: colors.cardBorder }]}>
             <View>
               <Text style={[styles.modalTitle, { color: colors.text, marginBottom: 0 }]}>
-                {editingToTag ? `Редактирование ${editingToTag}` : 'Новое Событие ТО'}
+                {editingToTag ? ('Редактирование ' + editingToTag) : 'Новое Событие ТО'}
               </Text>
               <Text style={{ fontSize: 11, color: colors.success, fontWeight: 'bold' }}>
                 Итого ТО: {Number(calculateLiveTOTotal()).toLocaleString('ru-RU')} ₽
@@ -1325,7 +1550,7 @@ export default function App() {
                   style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.cardBorder, color: colors.text }]}
                   value={toTag}
                   onChangeText={setToTag}
-                  placeholder="ТО-4..."
+                  placeholder="ТО-1..."
                   placeholderTextColor={colors.textMuted}
                 />
               </View>
@@ -1519,7 +1744,7 @@ export default function App() {
                 style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
                 value={carBrand}
                 onChangeText={setCarBrand}
-                placeholder="Changan..."
+                placeholder="Changan, Toyota..."
                 placeholderTextColor={colors.textMuted}
               />
 
@@ -1528,7 +1753,7 @@ export default function App() {
                 style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
                 value={carModel}
                 onChangeText={setCarModel}
-                placeholder="CS55 Plus..."
+                placeholder="CS55 Plus, RAV4..."
                 placeholderTextColor={colors.textMuted}
               />
 
@@ -1556,7 +1781,7 @@ export default function App() {
                 keyboardType="numeric"
                 value={carYear}
                 onChangeText={setCarYear}
-                placeholder="2023"
+                placeholder="2024"
                 placeholderTextColor={colors.textMuted}
               />
 
@@ -1614,7 +1839,7 @@ export default function App() {
                 style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
                 value={trName}
                 onChangeText={setTrName}
-                placeholder="Масло моторное (0W-20)..."
+                placeholder="Масло моторное..."
                 placeholderTextColor={colors.textMuted}
               />
 
@@ -1650,7 +1875,7 @@ export default function App() {
 
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Порог желтого (км):</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Порог предупреждения (км):</Text>
                   <TextInput
                     style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
                     keyboardType="numeric"
@@ -1674,7 +1899,7 @@ export default function App() {
                 style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, marginBottom: 8 }]}
                 value={trBrand}
                 onChangeText={setTrBrand}
-                placeholder="Лукойл Genesis JP..."
+                placeholder="Лукойл, ZIC..."
                 placeholderTextColor={colors.textMuted}
               />
 
@@ -2215,4 +2440,3 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   }
 });
-

@@ -2,10 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const DB_KEY = '@car_maintenance_db_v1';
 
-export const INITIAL_DB = {
+// --- DEMO DATABASE (Changan CS55 Plus with TO-2 and TO-3 history) ---
+export const DEMO_DB = {
   active_vehicle_id: "car_1",
   admin_password: "admin",
   theme: "dark",
+  is_onboarded: true,
   vehicles: [
     {
       id: "car_1",
@@ -369,18 +371,182 @@ export const INITIAL_DB = {
   ]
 };
 
+// --- DEFAULT CLEAN DATABASE (Everything set to 0, ready to configure a new car) ---
+export const DEFAULT_CLEAN_DB = {
+  active_vehicle_id: "car_1",
+  admin_password: "admin",
+  theme: "dark",
+  is_onboarded: false,
+  vehicles: [
+    {
+      id: "car_1",
+      name: "Мой автомобиль",
+      brand: "",
+      model: "",
+      plate: "",
+      engine: "",
+      year: new Date().getFullYear(),
+      vin: "",
+      current_km: 0,
+      current_engine_hours: 0,
+      oil_spec: ""
+    }
+  ],
+  trackers: [
+    {
+      id: "engine_oil",
+      name: "Масло моторное",
+      category: "Двигатель",
+      match: "масло",
+      interval_km: 7500,
+      interval_hours: 250,
+      warn_km: 1500,
+      warn_hours: 30,
+      spec: "",
+      brand: "",
+      article: "",
+      icon: "🛢️",
+      enabled: true
+    },
+    {
+      id: "oil_filter",
+      name: "Фильтр масляный",
+      category: "Фильтры",
+      match: "масляный",
+      interval_km: 7500,
+      interval_hours: 250,
+      warn_km: 1500,
+      warn_hours: 30,
+      spec: "",
+      brand: "",
+      article: "",
+      icon: "⚙️",
+      enabled: true
+    },
+    {
+      id: "air_filter",
+      name: "Фильтр воздушный ДВС",
+      category: "Фильтры",
+      match: "воздушный",
+      interval_km: 10000,
+      interval_hours: 250,
+      warn_km: 1500,
+      warn_hours: 30,
+      spec: "",
+      brand: "",
+      article: "",
+      icon: "💨",
+      enabled: true
+    },
+    {
+      id: "cabin_filter",
+      name: "Фильтр салонный",
+      category: "Фильтры",
+      match: "салон",
+      interval_km: 10000,
+      interval_hours: 250,
+      warn_km: 1500,
+      warn_hours: 30,
+      spec: "",
+      brand: "",
+      article: "",
+      icon: "❄️",
+      enabled: true
+    },
+    {
+      id: "spark_plugs",
+      name: "Свечи зажигания",
+      category: "Зажигание",
+      match: "свеч",
+      interval_km: 30000,
+      interval_hours: 0,
+      warn_km: 3000,
+      warn_hours: 0,
+      spec: "",
+      brand: "",
+      article: "",
+      icon: "⚡",
+      enabled: true
+    },
+    {
+      id: "coolant",
+      name: "Охлаждающая жидкость (Антифриз)",
+      category: "Охлаждение",
+      match: "антифриз",
+      interval_km: 50000,
+      interval_hours: 0,
+      warn_km: 5000,
+      warn_hours: 0,
+      spec: "G12+ / G12++",
+      brand: "",
+      article: "",
+      icon: "🧪",
+      enabled: true
+    },
+    {
+      id: "brake_fluid",
+      name: "Тормозная жидкость",
+      category: "Тормоза",
+      match: "тормозн",
+      interval_km: 30000,
+      interval_hours: 0,
+      warn_km: 3000,
+      warn_hours: 0,
+      spec: "DOT 4",
+      brand: "",
+      article: "",
+      icon: "🛑",
+      enabled: true
+    },
+    {
+      id: "transmission_oil",
+      name: "Масло трансмиссионное / КПП",
+      category: "Трансмиссия",
+      match: "трансмисс",
+      interval_km: 60000,
+      interval_hours: 0,
+      warn_km: 5000,
+      warn_hours: 0,
+      spec: "",
+      brand: "",
+      article: "",
+      icon: "🔄",
+      enabled: true
+    },
+    {
+      id: "drain_plug_ring",
+      name: "Кольцо сливной пробки",
+      category: "Двигатель",
+      match: "пробк",
+      interval_km: 7500,
+      interval_hours: 250,
+      warn_km: 1500,
+      warn_hours: 30,
+      spec: "",
+      brand: "",
+      article: "",
+      icon: "🔘",
+      enabled: true
+    }
+  ],
+  maintenance_records: []
+};
+
+// Default initial database is clean 0
+export const INITIAL_DB = DEFAULT_CLEAN_DB;
+
 export async function loadDatabase() {
   try {
     const jsonStr = await AsyncStorage.getItem(DB_KEY);
     if (!jsonStr) {
-      await AsyncStorage.setItem(DB_KEY, JSON.stringify(INITIAL_DB));
-      return INITIAL_DB;
+      await AsyncStorage.setItem(DB_KEY, JSON.stringify(DEFAULT_CLEAN_DB));
+      return DEFAULT_CLEAN_DB;
     }
     const parsed = JSON.parse(jsonStr);
     return parsed;
   } catch (e) {
     console.error('Failed to load local database', e);
-    return INITIAL_DB;
+    return DEFAULT_CLEAN_DB;
   }
 }
 
@@ -394,13 +560,14 @@ export async function saveDatabase(db) {
   }
 }
 
-export async function resetDatabase() {
+export async function resetDatabase(mode = 'clean') {
   try {
-    await AsyncStorage.setItem(DB_KEY, JSON.stringify(INITIAL_DB));
-    return INITIAL_DB;
+    const target = mode === 'demo' ? DEMO_DB : DEFAULT_CLEAN_DB;
+    await AsyncStorage.setItem(DB_KEY, JSON.stringify(target));
+    return target;
   } catch (e) {
     console.error('Failed to reset local database', e);
-    return INITIAL_DB;
+    return DEFAULT_CLEAN_DB;
   }
 }
 
@@ -441,44 +608,26 @@ export function calculateDashboardStatus(db) {
     if (latest) {
       const lastKm = Number(latest.mileage) || 0;
       const lastH = Number(latest.engine_hours) || 0;
-      const recIntKm = Number(latest.interval_km) || intervalKm;
-      const recIntH = Number(latest.interval_hours) || intervalH;
-
-      // Exact user formulas:
-      // eff_current_km = max(current_km, last_km)
-      // next_km = last_km + interval_km
-      // rem_km = next_km - eff_current_km
-      // wear_percent = min(100, (eff_current_km - last_km) / interval_km * 100)
       const effCurrentKm = Math.max(currentKm, lastKm);
-      const nextKm = lastKm + recIntKm;
+      const effCurrentH = Math.max(currentHours, lastH);
+
+      const nextKm = lastKm + intervalKm;
       const remKm = nextKm - effCurrentKm;
-      const wearPercent = recIntKm > 0 ? Math.min(100, Math.max(0, Math.round(((effCurrentKm - lastKm) / recIntKm) * 1000) / 10)) : 0;
 
-      // Engine hours wear
-      let remH = null;
-      let nextH = null;
-      if (recIntH > 0) {
-        const effCurrentH = Math.max(currentHours, lastH);
-        nextH = lastH + recIntH;
-        remH = nextH - effCurrentH;
-      }
+      const nextH = intervalH > 0 ? (lastH + intervalH) : null;
+      const remH = intervalH > 0 ? (nextH - effCurrentH) : null;
 
-      // Statuses:
-      // 🟢 В норме: rem_km > warn_km
-      // 🟡 Скоро замена: rem_km <= warn_km
-      // 🔴 Требуется замена: rem_km <= 0
+      const kmWear = Math.min(100, Math.round(((effCurrentKm - lastKm) / intervalKm) * 100));
+      const hWear = (intervalH > 0) ? Math.min(100, Math.round(((effCurrentH - lastH) / intervalH) * 100)) : 0;
+      const wearPercent = Math.max(kmWear, hWear);
+
       let statusCode = 'ok';
       let statusText = 'В норме';
 
-      const isDangerKm = remKm <= 0;
-      const isDangerH = remH !== null && remH <= 0;
-      const isWarnKm = remKm <= warnKm;
-      const isWarnH = remH !== null && warnH > 0 && remH <= warnH;
-
-      if (isDangerKm || isDangerH) {
+      if (remKm <= 0 || (remH !== null && remH <= 0)) {
         statusCode = 'danger';
         statusText = 'Требуется замена';
-      } else if (isWarnKm || isWarnH) {
+      } else if (remKm <= warnKm || (remH !== null && warnH > 0 && remH <= warnH)) {
         statusCode = 'warning';
         statusText = 'Скоро замена';
       }
@@ -487,12 +636,12 @@ export function calculateDashboardStatus(db) {
         id: tracker.id,
         name: tracker.name,
         icon: tracker.icon || '⚙️',
-        category: tracker.category || 'Двигатель',
-        last_date: latest.date,
+        category: tracker.category || latest.category || 'Двигатель',
+        last_date: latest.date || '—',
         last_km: lastKm,
         last_hours: lastH,
-        interval_km: recIntKm,
-        interval_hours: recIntH,
+        interval_km: intervalKm,
+        interval_hours: intervalH,
         next_km: nextKm,
         next_hours: nextH,
         rem_km: remKm,
@@ -506,21 +655,15 @@ export function calculateDashboardStatus(db) {
         to_tag: latest.to_tag || ''
       });
     } else {
-      // No replacement record yet
-      const nextKm = intervalKm;
-      const remKm = intervalKm - currentKm;
-      const nextH = intervalH > 0 ? intervalH : null;
-      const remH = intervalH > 0 ? intervalH - currentHours : null;
+      // Clean vehicle starting at 0 or initial entered mileage without records
+      const nextKm = currentKm + intervalKm;
+      const remKm = intervalKm;
+      const nextH = intervalH > 0 ? (currentHours + intervalH) : null;
+      const remH = intervalH > 0 ? intervalH : null;
 
+      const wearPercent = 0;
       let statusCode = 'ok';
-      let statusText = 'Нет записей';
-      if (remKm <= 0 || (remH !== null && remH <= 0)) {
-        statusCode = 'danger';
-        statusText = 'Требуется замена';
-      } else if (remKm <= warnKm || (remH !== null && warnH > 0 && remH <= warnH)) {
-        statusCode = 'warning';
-        statusText = 'Скоро замена';
-      }
+      let statusText = 'В норме (новый)';
 
       consumables.push({
         id: tracker.id,
