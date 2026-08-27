@@ -1,9 +1,13 @@
-name: 🚗 Build Android APK
+name: 🚗 Build Android APK & GitHub Release
 
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -37,9 +41,46 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
+      - name: 📂 Prepare Named APK for Release
+        run: |
+          mkdir -p release-apk
+          find android/app/build/outputs/apk/ -name "*.apk" -exec cp {} release-apk/AutoTO-v1.0.0.apk \;
+
       - name: 📤 Upload Ready APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CarMaintenance-APK
-          path: android/app/build/outputs/apk/**/*.apk
+          name: AutoTO-Release-APK
+          path: release-apk/*.apk
           retention-days: 30
+
+      - name: 🚀 Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-apk/*.apk
+          tag_name: ${{ github.ref_name }}
+          name: 🚗 Авто ТО ${{ github.ref_name }} — Автономное мобильное приложение
+          body: |
+            ## 📱 Релиз «Авто ТО» (${{ github.ref_name }})
+            
+            Полностью автономное (Offline-First) мобильное приложение на React Native & Expo для Android.
+            
+            ### ✨ Возможности релиза:
+            - **Режим «Чистый старт» («Все по нулям»):** возможность настроить новый автомобиль с чистого листа при первом запуске.
+            - **Мастер настройки автомобиля:** быстрый ввод марки, модели, госномера, двигателя, начального пробега и допуска масла.
+            - **Дашборд и «Светофор»:** расчет износа 9 ключевых расходников в реальном времени с прогресс-барами.
+            - **Умная защита ввода пробега:** автоматическое обнаружение суточного пробега и подсказка сложения.
+            - **Групповой учет ТО:** добавление деталей, выбор режима цен (за позицию / за 1 ед.), автоподсчет суммы.
+            - **Журнал всех деталей:** мгновенный поиск по бренду, артикулу и категориям.
+            - **Гараж:** поддержка нескольких авто и переключение в 1 клик.
+            - **Резервное копирование:** экспорт и импорт базы данных в формате JSON.
+            - **Темы:** Темная и Светлая темы оформления.
+            
+            ---
+            ### 📥 Установка:
+            1. Скачайте файл **`AutoTO-v1.0.0.apk`** ниже в блоке **Assets**.
+            2. Установите на ваш Android-смартфон.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
