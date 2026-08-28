@@ -30,7 +30,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'to-events', 'all-parts', 'settings', 'garage'
   const [dashboardView, setDashboardView] = useState('all'); // 'all', 'traffic-light', 'charts'
   const [theme, setTheme] = useState('dark');
-  const [isAdmin, setIsAdmin] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
 
   // Onboarding Wizard Modal
@@ -43,11 +42,6 @@ export default function App() {
   const [obKm, setObKm] = useState('0');
   const [obHours, setObHours] = useState('0');
   const [obOil, setObOil] = useState('');
-
-  // Modals state
-  const [authModalVisible, setAuthModalVisible] = useState(false);
-  const [authPassword, setAuthPassword] = useState('');
-  const [pendingAction, setPendingAction] = useState(null);
 
   // Mileage modal
   const [mileageModalVisible, setMileageModalVisible] = useState(false);
@@ -98,10 +92,6 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
 
-  // Password change
-  const [oldPwd, setOldPwd] = useState('');
-  const [newPwd, setNewPwd] = useState('');
-
   useEffect(() => {
     initApp();
   }, []);
@@ -131,27 +121,10 @@ export default function App() {
     await saveDatabase(newDb);
   };
 
+  // Direct editing without password required
   const requireAuth = (callback) => {
-    if (isAdmin) {
+    if (typeof callback === 'function') {
       callback();
-    } else {
-      setPendingAction(() => callback);
-      setAuthPassword('');
-      setAuthModalVisible(true);
-    }
-  };
-
-  const handleLogin = () => {
-    const expected = db?.admin_password || 'admin';
-    if (authPassword === expected) {
-      setIsAdmin(true);
-      setAuthModalVisible(false);
-      if (pendingAction) {
-        pendingAction();
-        setPendingAction(null);
-      }
-    } else {
-      Alert.alert('Ошибка', 'Неверный пароль! (По умолчанию: admin)');
     }
   };
 
@@ -794,24 +767,6 @@ export default function App() {
     });
   };
 
-  const changePassword = () => {
-    requireAuth(() => {
-      const current = db.admin_password || 'admin';
-      if (oldPwd !== current) {
-        Alert.alert('Ошибка', 'Текущий пароль неверен');
-        return;
-      }
-      if (!newPwd || newPwd.length < 3) {
-        Alert.alert('Ошибка', 'Пароль должен содержать минимум 3 символа');
-        return;
-      }
-      updateDb({ ...db, admin_password: newPwd });
-      setOldPwd('');
-      setNewPwd('');
-      Alert.alert('Успешно', 'Пароль администратора изменен!');
-    });
-  };
-
   // Filtered parts for Tab 3
   const categoriesList = ['Все', 'Двигатель', 'Фильтры', 'Зажигание', 'Охлаждение', 'Тормоза', 'Трансмиссия', 'Прочее'];
   const filteredRecords = records.filter(r => {
@@ -873,29 +828,6 @@ export default function App() {
             activeOpacity={0.7}
           >
             <Text style={{ fontSize: 14 }}>{isDark ? '☀️' : '🌙'}</Text>
-          </TouchableOpacity>
-
-          {/* Admin Auth Toggle */}
-          <TouchableOpacity
-            onPress={() => {
-              if (isAdmin) {
-                setIsAdmin(false);
-                Alert.alert('Выход', 'Сессия администратора завершена');
-              } else {
-                setAuthPassword('');
-                setAuthModalVisible(true);
-              }
-            }}
-            style={[
-              styles.iconButton, 
-              { 
-                backgroundColor: isAdmin ? '#10b98120' : colors.cardSecondary, 
-                borderColor: isAdmin ? '#10b981' : colors.cardBorder 
-              }
-            ]}
-            activeOpacity={0.7}
-          >
-            <Text style={{ fontSize: 14 }}>{isAdmin ? '🔓' : '🔒'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -1509,32 +1441,6 @@ export default function App() {
               ))}
             </View>
 
-            {/* Password Change Card */}
-            <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-              <Text style={[styles.settingsTitle, { color: colors.text }]}>🔐 Пароль администратора</Text>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 10 }}>
-                Защищает редактирование записей ТО, регламентов и гаража.
-              </Text>
-              <TextInput
-                style={[styles.settingInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
-                placeholder="Текущий пароль (по умолч.: admin)..."
-                placeholderTextColor={colors.textMuted}
-                secureTextEntry
-                value={oldPwd}
-                onChangeText={setOldPwd}
-              />
-              <TextInput
-                style={[styles.settingInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
-                placeholder="Новый пароль..."
-                placeholderTextColor={colors.textMuted}
-                secureTextEntry
-                value={newPwd}
-                onChangeText={setNewPwd}
-              />
-              <TouchableOpacity onPress={changePassword} style={styles.saveBtn}>
-                <Text style={styles.saveBtnText}>Сменить пароль</Text>
-              </TouchableOpacity>
-            </View>
 
             {/* Backup & Export / Import Card */}
             <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -1562,7 +1468,7 @@ export default function App() {
                     О приложении и Разработчик
                   </Text>
                   <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                    Авто ТО v1.0.4 • 100% Offline-First
+                    Авто ТО v1.0.5 • 100% Offline-First
                   </Text>
                 </View>
               </View>
@@ -1803,34 +1709,6 @@ export default function App() {
                 </Text>
               </TouchableOpacity>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* --- MODAL: ADMIN PASSWORD --- */}
-      <Modal visible={authModalVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalBox, { backgroundColor: colors.card }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>🔒 Режим администратора</Text>
-            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 14 }}>
-              Введите пароль для внесения изменений (по умолчанию: <Text style={{ fontWeight: 'bold' }}>admin</Text>):
-            </Text>
-            <TextInput
-              style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
-              placeholder="Пароль администратора..."
-              placeholderTextColor={colors.textMuted}
-              secureTextEntry
-              value={authPassword}
-              onChangeText={setAuthPassword}
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity onPress={() => setAuthModalVisible(false)} style={styles.modalCancelBtn}>
-                <Text style={{ color: colors.textMuted, fontWeight: 'bold' }}>Отмена</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleLogin} style={styles.modalConfirmBtn}>
-                <Text style={{ color: '#fff', fontWeight: 'bold' }}>Войти</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       </Modal>

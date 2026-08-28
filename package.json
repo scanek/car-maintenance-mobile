@@ -1,6 +1,6 @@
 {
   "name": "car-maintenance-mobile",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "author": "Александр Щеголев (@scanek)",
   "scripts": {
     "start": "expo start",
