@@ -785,23 +785,29 @@ export default function App() {
           <View style={styles.carIconBox}>
             <Text style={{ fontSize: 18 }}>🚗</Text>
           </View>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={[styles.carNameText, { color: colors.text }]} numberOfLines={1}>{activeVehicle?.name || 'Автомобиль'}</Text>
+          <View style={styles.headerCarInfo}>
+            <Text style={[styles.carNameText, { color: colors.text }]} numberOfLines={1} ellipsizeMode="tail">
+              {activeVehicle?.name || 'Автомобиль'}
+            </Text>
+            <View style={styles.carSubRow}>
               {activeVehicle?.plate ? (
                 <View style={styles.plateBadge}>
                   <Text style={styles.plateBadgeText}>{activeVehicle.plate}</Text>
                 </View>
               ) : null}
+              <Text style={[styles.carSubText, { color: colors.textMuted }]} numberOfLines={1} ellipsizeMode="tail">
+                {activeVehicle?.plate ? '• ' : ''}{Number(activeVehicle?.current_km || 0).toLocaleString('ru-RU')} км
+              </Text>
             </View>
-            <Text style={[styles.carSubText, { color: colors.textMuted }]}>
-              {activeVehicle?.engine || 'Автомобиль'} • {Number(activeVehicle?.current_km || 0).toLocaleString('ru-RU')} км
-            </Text>
           </View>
         </TouchableOpacity>
 
         <View style={styles.headerRight}>
-          <TouchableOpacity onPress={toggleTheme} style={[styles.iconButton, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}>
+          <TouchableOpacity 
+            onPress={toggleTheme} 
+            style={[styles.iconButton, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}
+            activeOpacity={0.7}
+          >
             <Text style={{ fontSize: 15 }}>{isDark ? '☀️' : '🌙'}</Text>
           </TouchableOpacity>
 
@@ -815,11 +821,16 @@ export default function App() {
                 setAuthModalVisible(true);
               }
             }}
-            style={[styles.authButton, { backgroundColor: isAdmin ? '#10b98120' : colors.cardSecondary, borderColor: isAdmin ? '#10b981' : colors.cardBorder }]}
+            style={[
+              styles.iconButton, 
+              { 
+                backgroundColor: isAdmin ? '#10b98120' : colors.cardSecondary, 
+                borderColor: isAdmin ? '#10b981' : colors.cardBorder 
+              }
+            ]}
+            activeOpacity={0.7}
           >
-            <Text style={{ fontSize: 11, fontWeight: 'bold', color: isAdmin ? '#10b981' : colors.textMuted }}>
-              {isAdmin ? '🔓 Режим: Админ' : '🔒 Войти'}
-            </Text>
+            <Text style={{ fontSize: 15 }}>{isAdmin ? '🔓' : '🔒'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -1977,7 +1988,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     borderBottomWidth: 1,
   },
@@ -1986,6 +1997,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     flex: 1,
+    paddingRight: 8,
+    minWidth: 0,
+  },
+  headerCarInfo: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
   },
   carIconBox: {
     width: 38,
@@ -1994,14 +2012,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563eb',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   carNameText: {
     fontSize: 14,
     fontWeight: 'bold',
   },
+  carSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
   carSubText: {
     fontSize: 11,
-    marginTop: 1,
+    flexShrink: 1,
   },
   plateBadge: {
     backgroundColor: '#fef08a',
@@ -2010,6 +2035,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#fde047',
+    flexShrink: 0,
   },
   plateBadgeText: {
     fontSize: 10,
@@ -2019,18 +2045,16 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    flexShrink: 0,
   },
   iconButton: {
-    padding: 7,
-    borderRadius: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 9,
     borderWidth: 1,
-  },
-  authButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   mainScrollView: {
     flex: 1,
