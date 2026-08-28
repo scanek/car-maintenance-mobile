@@ -760,7 +760,7 @@ export default function App() {
         setImportModalVisible(false);
         const carCount = res.db.vehicles?.length || 1;
         const recCount = res.db.maintenance_records?.length || 0;
-        Alert.alert('Успешно', \`База данных успешно загружена из файла "${res.filename}"!\\n\\n🚗 Автомобилей: ${carCount}\\n📋 Записей ТО и расходов: ${recCount}\`);
+        Alert.alert('Успешно', 'База данных успешно загружена из файла "' + res.filename + '"!\n\n🚗 Автомобилей: ' + carCount + '\n📋 Записей ТО и расходов: ' + recCount);
       }
     } catch (e) {
       Alert.alert('Ошибка импорта', 'Не удалось загрузить бэкап: ' + e.message);
@@ -780,7 +780,7 @@ export default function App() {
       setImportJsonText('');
       const carCount = normalized.vehicles?.length || 1;
       const recCount = normalized.maintenance_records?.length || 0;
-      Alert.alert('Успешно', \`База данных успешно восстановлена!\\n\\n🚗 Автомобилей: ${carCount}\\n📋 Записей ТО и расходов: ${recCount}\`);
+      Alert.alert('Успешно', 'База данных успешно восстановлена!\n\n🚗 Автомобилей: ' + carCount + '\n📋 Записей ТО и расходов: ' + recCount);
     } catch (e) {
       Alert.alert('Ошибка парсинга', 'Некорректный JSON файл: ' + e.message);
     }
@@ -1504,7 +1504,7 @@ export default function App() {
                     О приложении и Разработчик
                   </Text>
                   <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                    Авто ТО v1.0.6 • 100% Offline-First
+                    Авто ТО v1.0.7 • 100% Offline-First
                   </Text>
                 </View>
               </View>

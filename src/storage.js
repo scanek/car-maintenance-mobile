@@ -732,8 +732,8 @@ export async function exportBackupFile(db) {
 
     const cleanBrand = (vehicle?.brand || 'auto').replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_');
     const cleanModel = (vehicle?.model || '').replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_');
-    const filename = \`backup_${cleanBrand}_${cleanModel || 'vehicle'}.json\`;
-    const fileUri = \`${FileSystem.documentDirectory}${filename}\`;
+    const filename = 'backup_' + cleanBrand + '_' + (cleanModel || 'vehicle') + '.json';
+    const fileUri = FileSystem.documentDirectory + filename;
 
     await FileSystem.writeAsStringAsync(fileUri, jsonStr, {
       encoding: FileSystem.EncodingType.UTF8
@@ -743,7 +743,7 @@ export async function exportBackupFile(db) {
     if (isAvailable) {
       await Sharing.shareAsync(fileUri, {
         mimeType: 'application/json',
-        dialogTitle: \`Резервная копия: ${filename}\`,
+        dialogTitle: 'Резервная копия: ' + filename,
         UTI: 'public.json'
       });
       return { success: true, filename, fileUri };
