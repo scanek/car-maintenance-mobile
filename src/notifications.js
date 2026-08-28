@@ -53,7 +53,7 @@ export async function sendTestNotification(vehicleName = 'Мой автомоб�
     await Notifications.scheduleNotificationAsync({
       content: {
         title: '🔔 Тест уведомлений: ' + vehicleName,
-        body: 'Напоминания о ТО активны! Вы будете предупреждены за ' + warnKm + ' км или ' + warnHours + ' м/ч до замены расходников.',
+        body: 'Напоминания о ТО и страховках активны! Вы будете предупреждены за ' + warnKm + ' км или ' + warnHours + ' м/ч до замены расходников.',
         sound: true,
         channelId: 'maintenance_alerts',
         data: { type: 'test' }
@@ -69,27 +69,56 @@ export async function sendTestNotification(vehicleName = 'Мой автомоб�
 }
 
 /**
- * Check if any consumables are approaching maintenance and trigger alerts
+ * Check if any consumables are approaching maintenance or insurances expiring
  */
 export async function checkAndNotifyUpcomingTO(db) {
   try {
     if (!db) return;
-    const notifSettings = db.notification_settings || { enabled: true, default_warn_km: 1000, default_warn_hours: 30 };
+    const notifSettings = db.notification_settings || { enabled: true, default_warn_km: 1000, default_warn_hours: 30, default_warn_days: 30 };
     if (notifSettings.enabled === false) return;
 
     const statusData = calculateDashboardStatus(db);
     const vehicle = statusData.vehicle || getActiveVehicle(db);
     if (!vehicle) return;
 
-    const urgentItems = statusData.consumables.filter(c => c.status_code === 'danger' || c.status_code === 'warning');
-    if (urgentItems.length === 0) return;
-
     const granted = await requestNotificationPermissions();
     if (!granted) return;
 
     const carName = vehicle.name || ((vehicle.brand || '') + ' ' + (vehicle.model || '')).trim() || 'Автомобиль';
-    
-    // Group urgent items
+    const now = new Date();
+
+    // 1. Check Insurances expiration
+    const insurances = (db.other_expenses || []).filter(e => 
+      (e.vehicle_id || 'car_1') === vehicle.id && 
+      e.category === 'Страховка' && 
+      e.expiry_date
+    );
+
+    for (const ins of insurances) {
+      const expDate = new Date(ins.expiry_date);
+      const daysLeft = Math.round((expDate - now) / (1000 * 60 * 60 * 24));
+      if (daysLeft >= 0 && daysLeft <= 30) {
+        let alertTitle = '📄 ' + carName + ': Заканчивается страховка!';
+        let alertBody = 'Срок действия "' + ins.title + '" истекает через ' + daysLeft + ' дн. (' + ins.expiry_date + ')';
+        if (daysLeft === 0) alertBody = 'Сегодня последний день действия полиса "' + ins.title + '"!';
+
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: alertTitle,
+            body: alertBody,
+            sound: true,
+            channelId: 'maintenance_alerts',
+            data: { type: 'insurance', id: ins.id }
+          },
+          trigger: null,
+        });
+      }
+    }
+
+    // 2. Check Consumables & Maintenance
+    const urgentItems = statusData.consumables.filter(c => c.status_code === 'danger' || c.status_code === 'warning');
+    if (urgentItems.length === 0) return;
+
     const dangerItems = urgentItems.filter(c => c.status_code === 'danger');
     const warningItems = urgentItems.filter(c => c.status_code === 'warning');
 
@@ -103,9 +132,11 @@ export async function checkAndNotifyUpcomingTO(db) {
     } else if (warningItems.length > 0) {
       title = '⚠️ Скоро ТО: ' + carName;
       const first = warningItems[0];
-      const remText = first.rem_km > 0 ? (first.rem_km + ' км') : '';
-      const remHText = (first.rem_hours !== null && first.rem_hours > 0) ? (first.rem_hours + ' м/ч') : '';
-      const remCombined = [remText, remHText].filter(Boolean).join(' / ');
+      const parts = [];
+      if (first.rem_km > 0) parts.push(first.rem_km + ' км');
+      if (first.rem_hours !== null && first.rem_hours > 0) parts.push(first.rem_hours + ' м/ч');
+      if (first.rem_days !== undefined && first.rem_days <= 30) parts.push(first.rem_days + ' дн.');
+      const remCombined = parts.join(' / ') || 'скоро';
       
       if (warningItems.length === 1) {
         body = 'До замены "' + first.name + '" осталось всего ' + remCombined + '!';

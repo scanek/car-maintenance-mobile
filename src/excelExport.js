@@ -1,217 +1,286 @@
 import * as XLSX from 'xlsx';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { getActiveVehicle, calculateDashboardStatus, getTOGroups } from './storage';
+import { getActiveVehicle, calculateDashboardStatus } from './storage';
 
 export async function exportToExcel(db) {
-  try {
-    const vehicle = getActiveVehicle(db);
-    const statusData = calculateDashboardStatus(db);
-    const toGroups = getTOGroups(db);
-    const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === vehicle?.id);
+  if (!db) throw new Error('База данных пуста');
 
-    const wb = XLSX.utils.book_new();
+  const statusData = calculateDashboardStatus(db);
+  const vehicle = statusData.vehicle || getActiveVehicle(db);
+  const vId = vehicle ? vehicle.id : 'car_1';
 
-    // ==========================================
-    // SHEET 1: СВОДКА И KPI
-    // ==========================================
-    const summaryRows = [
-      ['ОТЧЕТ ПО АВТОМОБИЛЮ И ТЕХНИЧЕСКОМУ ОБСЛУЖИВАНИЮ (АВТО ТО)', ''],
-      ['Разработчик приложения', 'Александр Щеголев (@scanek)'],
-      ['Дата формирования отчета', new Date().toLocaleString('ru-RU')],
-      ['', ''],
-      ['ПАРАМЕТРЫ АВТОМОБИЛЯ', ''],
-      ['Наименование авто', vehicle?.name || 'Автомобиль'],
-      ['Марка', vehicle?.brand || '—'],
-      ['Модель', vehicle?.model || '—'],
-      ['Госномер', vehicle?.plate || '—'],
-      ['Год выпуска', vehicle?.year || '—'],
-      ['Двигатель / КПП', vehicle?.engine || '—'],
-      ['VIN номер', vehicle?.vin || '—'],
-      ['Рекомендованное масло / Допуск', vehicle?.oil_spec || '—'],
-      ['', ''],
-      ['КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ (KPI)', ''],
-      ['Текущий пробег (км)', statusData.kpi.current_km || 0],
-      ['Текущие моточасы (м/ч)', statusData.kpi.current_hours || 0],
-      ['Средняя скорость (км/ч)', Number(statusData.kpi.avg_speed) || 0],
-      ['Всего проведено ТО', toGroups.length],
-      ['Всего заменено деталей (позиций)', records.length],
-      ['Общая сумма затрат на ТО (₽)', statusData.kpi.total_spent || 0],
-      ['Стоимость 1 км пробега (₽/км)', Number(statusData.kpi.cost_per_km) || 0],
-      ['Позиций, требующих внимания', statusData.kpi.attention_count || 0]
-    ];
-    const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
-    wsSummary['!cols'] = [{ wch: 35 }, { wch: 35 }];
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Сводка авто');
+  const wb = XLSX.utils.book_new();
 
-    // ==========================================
-    // SHEET 2: РЕСУРС РАСХОДНИКОВ («СВЕТОФОР»)
-    // ==========================================
-    const consumableRows = [
-      [
-        'Расходник / Узел',
-        'Категория',
-        'Статус',
-        'Износ (%)',
-        'Остаток ресурса (км)',
-        'Остаток (м/ч)',
-        'Замена на одометре (км)',
-        'Интервал (км)',
-        'Интервал (м/ч)',
-        'Последняя замена (ТО)',
-        'Дата посл. замены',
-        'Пробег посл. замены (км)',
-        'Бренд / Марка',
-        'Артикул',
-        'Спецификация / Допуск'
-      ]
-    ];
+  // -------------------------------------------------------------
+  // SHEET 1: СВОДКА АВТО И TCO (ПОЛНАЯ СТОИМОСТЬ ВЛАДЕНИЯ)
+  // -------------------------------------------------------------
+  const summaryRows = [
+    ['Разработчик приложения', 'Александр Щеголев (@scanek)'],
+    ['Версия базы данных', db.version || '2.6'],
+    ['Дата выгрузки отчета', new Date().toLocaleString('ru-RU')],
+    [''],
+    ['--- ОСНОВНЫЕ ДАННЫЕ АВТОМОБИЛЯ ---', ''],
+    ['Автомобиль', vehicle?.name || '—'],
+    ['Марка / Модель', (vehicle?.brand || '') + ' ' + (vehicle?.model || '')],
+    ['Госномер', vehicle?.plate || '—'],
+    ['Двигатель', vehicle?.engine || '—'],
+    ['Год выпуска', vehicle?.year || '—'],
+    ['VIN-номер', vehicle?.vin || '—'],
+    ['Допуск масла', vehicle?.oil_spec || '—'],
+    [''],
+    ['--- ЭКСПЛУАТАЦИОННЫЕ ПОКАЗАТЕЛИ ---', ''],
+    ['Текущий пробег (км)', Number(statusData.kpi.current_km)],
+    ['Наработка моточасов (м/ч)', Number(statusData.kpi.current_hours)],
+    ['Средняя скорость (км/ч)', Number(statusData.kpi.avg_speed)],
+    ['Средний расход топлива (л/100 км)', Number(statusData.kpi.avg_fuel_consumption)],
+    [''],
+    ['--- ПОЛНАЯ СТОИМОСТЬ ВЛАДЕНИЯ (TCO) ---', ''],
+    ['Общие затраты (руб)', Number(statusData.kpi.total_spent)],
+    ['Затраты на ТО и запчасти (руб)', Number(statusData.kpi.to_spent)],
+    ['Затраты на топливо (руб)', Number(statusData.kpi.fuel_spent)],
+    ['Страховки и прочие расходы (руб)', Number(statusData.kpi.expenses_spent)],
+    ['Стоимость 1 км пути (общая)', Number(statusData.kpi.cost_per_km)],
+    ['Стоимость 1 км (топливо)', Number(statusData.kpi.cost_per_km_fuel)],
+    ['Стоимость 1 дня владения (руб/день)', Number(statusData.kpi.cost_per_day)],
+    ['Позиций, требующих внимания', Number(statusData.kpi.attention_count)]
+  ];
 
-    statusData.consumables.forEach(c => {
-      consumableRows.push([
-        c.name,
-        c.category,
-        c.status_text,
-        c.wear_percent + '%',
-        c.rem_km,
-        c.rem_hours !== null ? c.rem_hours : '—',
-        c.next_km,
-        c.interval_km,
-        c.interval_hours > 0 ? c.interval_hours : '—',
-        c.to_tag || '—',
-        c.last_date || '—',
-        c.last_km || 0,
-        c.brand || '—',
-        c.article || '—',
-        c.spec || '—'
-      ]);
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+  wsSummary['!cols'] = [{ wch: 36 }, { wch: 40 }];
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Сводка и TCO');
+
+  // -------------------------------------------------------------
+  // SHEET 2: СВЕТОФОР РАСХОДНИКОВ И РЕГЛАМЕНТЫ
+  // -------------------------------------------------------------
+  const consumableRows = [
+    [
+      'Расходник / Узел',
+      'Категория',
+      'Статус',
+      'Износ (%)',
+      'Остаток (км)',
+      'Остаток (м/ч)',
+      'Остаток (дн)',
+      'Интервал (км)',
+      'Интервал (м/ч)',
+      'Интервал (мес)',
+      'Посл. замена (км)',
+      'Посл. дата',
+      'Бренд / Артикул'
+    ]
+  ];
+
+  statusData.consumables.forEach(c => {
+    consumableRows.push([
+      c.name,
+      c.category,
+      c.status_text,
+      c.wear_percent,
+      c.rem_km,
+      c.rem_hours !== null ? c.rem_hours : '—',
+      c.rem_days !== undefined ? c.rem_days : '—',
+      c.interval_km,
+      c.interval_hours > 0 ? c.interval_hours : '—',
+      c.interval_months > 0 ? c.interval_months : '—',
+      c.last_km > 0 ? c.last_km : '—',
+      c.last_date,
+      [c.brand, c.article].filter(Boolean).join(' / ') || '—'
+    ]);
+  });
+
+  const wsConsumables = XLSX.utils.aoa_to_sheet(consumableRows);
+  wsConsumables['!cols'] = [
+    { wch: 30 }, { wch: 15 }, { wch: 18 }, { wch: 10 },
+    { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
+    { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 25 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsConsumables, 'Светофор ТО');
+
+  // -------------------------------------------------------------
+  // SHEET 3: ЖУРНАЛ ВСЕХ ЗАПИСЕЙ ТО
+  // -------------------------------------------------------------
+  const toRecords = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === vId);
+  const toLogRows = [
+    [
+      'Метка ТО',
+      'Дата',
+      'Пробег (км)',
+      'Моточасы (м/ч)',
+      'Категория',
+      'Наименование детали / работы',
+      'Бренд',
+      'Артикул',
+      'Кол-во',
+      'Ед.',
+      'Цена за ед.',
+      'Сумма (руб)',
+      'След. замена (км)',
+      'Магазин / Сервис',
+      'Заметки'
+    ]
+  ];
+
+  toRecords.forEach(r => {
+    toLogRows.push([
+      r.to_tag || '—',
+      r.date || '—',
+      r.mileage || 0,
+      r.engine_hours || '—',
+      r.category || 'Двигатель',
+      r.item_name || '—',
+      r.brand || '—',
+      r.article || '—',
+      r.quantity || 1,
+      r.unit || 'шт',
+      r.price_per_unit || 0,
+      r.total_price || 0,
+      r.next_km || '—',
+      r.store || '—',
+      r.note || '—'
+    ]);
+  });
+
+  const wsTOLog = XLSX.utils.aoa_to_sheet(toLogRows);
+  wsTOLog['!cols'] = [
+    { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+    { wch: 15 }, { wch: 32 }, { wch: 16 }, { wch: 16 },
+    { wch: 8 }, { wch: 6 }, { wch: 12 }, { wch: 14 },
+    { wch: 16 }, { wch: 16 }, { wch: 25 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsTOLog, 'Журнал ТО');
+
+  // -------------------------------------------------------------
+  // SHEET 4: ЗАПРАВКИ И ТОПЛИВО
+  // -------------------------------------------------------------
+  const fuelRecords = (db.fuel_records || []).filter(f => (f.vehicle_id || 'car_1') === vId);
+  const fuelRows = [
+    [
+      'Дата',
+      'Пробег (км)',
+      'Объем (л)',
+      'Цена за литр (руб)',
+      'Сумма (руб)',
+      'Тип топлива',
+      'Полный бак',
+      'АЗС / Сеть',
+      'Заметки'
+    ]
+  ];
+
+  fuelRecords.forEach(f => {
+    fuelRows.push([
+      f.date || '—',
+      f.mileage || 0,
+      f.liters || 0,
+      f.price_per_liter || 0,
+      f.total_price || 0,
+      f.fuel_type || 'АИ-95',
+      f.is_full_tank ? 'Да' : 'Нет',
+      f.station || '—',
+      f.note || '—'
+    ]);
+  });
+
+  const wsFuel = XLSX.utils.aoa_to_sheet(fuelRows);
+  wsFuel['!cols'] = [
+    { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 18 },
+    { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 25 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsFuel, 'Заправки');
+
+  // -------------------------------------------------------------
+  // SHEET 5: ПРОЧИЕ РАСХОДЫ И СТРАХОВАНИЕ
+  // -------------------------------------------------------------
+  const otherExpenses = (db.other_expenses || []).filter(e => (e.vehicle_id || 'car_1') === vId);
+  const expenseRows = [
+    [
+      'Дата',
+      'Пробег (км)',
+      'Категория',
+      'Наименование / Описание',
+      'Сумма (руб)',
+      'Срок действия до',
+      'Заметки'
+    ]
+  ];
+
+  otherExpenses.forEach(e => {
+    expenseRows.push([
+      e.date || '—',
+      e.mileage || 0,
+      e.category || 'Прочее',
+      e.title || '—',
+      e.total_price || 0,
+      e.expiry_date || '—',
+      e.note || '—'
+    ]);
+  });
+
+  const wsExpenses = XLSX.utils.aoa_to_sheet(expenseRows);
+  wsExpenses['!cols'] = [
+    { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 32 },
+    { wch: 14 }, { wch: 16 }, { wch: 25 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsExpenses, 'Прочие расходы');
+
+  // -------------------------------------------------------------
+  // SHEET 6: КОМПЛЕКТЫ ШИН И КОЛЕСА
+  // -------------------------------------------------------------
+  const tyreSets = (db.tyre_sets || []).filter(t => (t.vehicle_id || 'car_1') === vId);
+  const tyreRows = [
+    [
+      'Комплект',
+      'Сезон',
+      'Тип',
+      'Модель шины',
+      'Размерность',
+      'Пробег на комплекте (км)',
+      'Остаток протектора (мм)',
+      'Установлен сейчас'
+    ]
+  ];
+
+  tyreSets.forEach(t => {
+    tyreRows.push([
+      t.name || '—',
+      t.season === 'summer' ? 'Лето' : 'Зима',
+      t.type === 'stud' ? 'Шипы' : (t.type === 'friction' ? 'Липучка' : 'Шоссе'),
+      t.brand_model || '—',
+      t.size || '—',
+      t.current_km || 0,
+      t.tread_depth_mm || 0,
+      t.is_active ? 'Да (Активен)' : 'На хранении'
+    ]);
+  });
+
+  const wsTyres = XLSX.utils.aoa_to_sheet(tyreRows);
+  wsTyres['!cols'] = [
+    { wch: 25 }, { wch: 10 }, { wch: 12 }, { wch: 28 },
+    { wch: 18 }, { wch: 24 }, { wch: 22 }, { wch: 16 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsTyres, 'Шины и Колеса');
+
+  // --- WRITE FILE AND SHARE ---
+  const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+  const cleanBrand = (vehicle?.brand || 'auto').replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_');
+  const cleanModel = (vehicle?.model || '').replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_');
+  const filename = 'auto_to_report_' + cleanBrand + '_' + (cleanModel || 'car') + '.xlsx';
+  const fileUri = FileSystem.documentDirectory + filename;
+
+  await FileSystem.writeAsStringAsync(fileUri, wbout, {
+    encoding: FileSystem.EncodingType.Base64
+  });
+
+  const isAvailable = await Sharing.isAvailableAsync();
+  if (isAvailable) {
+    await Sharing.shareAsync(fileUri, {
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      dialogTitle: 'Экспорт отчета по автомобилю: ' + filename,
+      UTI: 'com.microsoft.excel.xlsx'
     });
-
-    const wsConsumables = XLSX.utils.aoa_to_sheet(consumableRows);
-    wsConsumables['!cols'] = [
-      { wch: 28 }, { wch: 16 }, { wch: 18 }, { wch: 12 },
-      { wch: 22 }, { wch: 15 }, { wch: 24 }, { wch: 15 },
-      { wch: 15 }, { wch: 22 }, { wch: 18 }, { wch: 24 },
-      { wch: 20 }, { wch: 18 }, { wch: 30 }
-    ];
-    XLSX.utils.book_append_sheet(wb, wsConsumables, 'Светофор расходников');
-
-    // ==========================================
-    // SHEET 3: ИСТОРИЯ ТО (ГРУППЫ)
-    // ==========================================
-    const toRows = [
-      [
-        'Событие ТО',
-        'Дата проведения',
-        'Пробег (км)',
-        'Моточасы (м/ч)',
-        'Кол-во замененных деталей',
-        'Итоговая стоимость ТО (₽)',
-        'Список замененных деталей'
-      ]
-    ];
-
-    toGroups.forEach(g => {
-      const partsSummary = g.parts.map(p => p.item_name + ' (' + (p.brand || '') + ' ' + (p.article ? '[' + p.article + ']' : '') + ') - ' + p.total_price + ' ₽').join('; ');
-      toRows.push([
-        g.to_tag,
-        g.date,
-        g.mileage,
-        g.engine_hours,
-        g.parts.length,
-        g.total_cost,
-        partsSummary
-      ]);
-    });
-
-    const wsTO = XLSX.utils.aoa_to_sheet(toRows);
-    wsTO['!cols'] = [
-      { wch: 15 }, { wch: 16 }, { wch: 14 }, { wch: 16 },
-      { wch: 26 }, { wch: 24 }, { wch: 60 }
-    ];
-    XLSX.utils.book_append_sheet(wb, wsTO, 'Журнал ТО');
-
-    // ==========================================
-    // SHEET 4: ДЕТАЛЬНЫЙ РЕЕСТР ВСЕХ ЗАПЧАСТЕЙ
-    // ==========================================
-    const partsRows = [
-      [
-        'ID',
-        'Событие ТО',
-        'Дата',
-        'Пробег (км)',
-        'Моточасы (м/ч)',
-        'Категория',
-        'Наименование детали',
-        'Бренд / Марка',
-        'Артикул',
-        'Количество',
-        'Ед. изм.',
-        'Тип цены',
-        'Цена за ед. (₽)',
-        'Сумма (₽)',
-        'Магазин / Поставщик',
-        'Примечание'
-      ]
-    ];
-
-    records.forEach((r, idx) => {
-      partsRows.push([
-        r.id || (idx + 1),
-        r.to_tag || '—',
-        r.date || '—',
-        r.mileage || 0,
-        r.engine_hours || 0,
-        r.category || '—',
-        r.item_name || '—',
-        r.brand || '—',
-        r.article || '—',
-        r.quantity || 1,
-        r.unit || 'шт',
-        r.price_type === 'unit' ? 'За 1 ед.' : 'За позицию',
-        r.price_per_unit || r.total_price || 0,
-        r.total_price || 0,
-        r.store || '—',
-        r.note || ''
-      ]);
-    });
-
-    const wsParts = XLSX.utils.aoa_to_sheet(partsRows);
-    wsParts['!cols'] = [
-      { wch: 6 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 },
-      { wch: 16 }, { wch: 30 }, { wch: 20 }, { wch: 18 }, { wch: 12 },
-      { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 20 }, { wch: 25 }
-    ];
-    XLSX.utils.book_append_sheet(wb, wsParts, 'Реестр запчастей');
-
-    // Generate Excel base64 string
-    const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-
-    // Clean safe filename
-    const carNameClean = (vehicle?.name || 'Auto').replace(/[^a-zA-Zа-яА-Я0-9_-]/g, '_');
-    const dateStr = new Date().toISOString().split('T')[0];
-    const filename = 'AutoTO_Report_' + carNameClean + '_' + dateStr + '.xlsx';
-    const fileUri = FileSystem.documentDirectory + filename;
-
-    // Save to local device file
-    await FileSystem.writeAsStringAsync(fileUri, base64, {
-      encoding: FileSystem.EncodingType.Base64
-    });
-
-    // Check sharing availability and share
-    const isAvailable = await Sharing.isAvailableAsync();
-    if (isAvailable) {
-      await Sharing.shareAsync(fileUri, {
-        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        dialogTitle: 'Отчет Excel: ' + filename,
-        UTI: 'com.microsoft.excel.xlsx'
-      });
-      return { success: true, filename, fileUri };
-    } else {
-      return { success: true, filename, fileUri, shared: false };
-    }
-  } catch (error) {
-    console.error('Failed to export Excel:', error);
-    throw error;
+    return { success: true, filename, fileUri };
+  } else {
+    return { success: true, filename, fileUri, shared: false };
   }
 }
