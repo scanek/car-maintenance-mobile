@@ -10,7 +10,8 @@ import {
   Alert,
   SafeAreaView,
   StatusBar,
-  Share
+  Share,
+  ActivityIndicator
 } from 'react-native';
 import {
   loadDatabase,
@@ -22,12 +23,15 @@ import {
   DEFAULT_CLEAN_DB,
   DEMO_DB
 } from './src/storage';
+import { exportToExcel } from './src/excelExport';
 
 export default function App() {
   const [db, setDb] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'to-events', 'all-parts', 'settings', 'garage'
+  const [dashboardView, setDashboardView] = useState('all'); // 'all', 'traffic-light', 'charts'
   const [theme, setTheme] = useState('dark');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
 
   // Onboarding Wizard Modal
   const [onboardingModalVisible, setOnboardingModalVisible] = useState(false);
@@ -159,6 +163,21 @@ export default function App() {
     }
   };
 
+  // --- EXCEL EXPORT HANDLER ---
+  const handleDownloadExcel = async () => {
+    try {
+      setIsExportingExcel(true);
+      const result = await exportToExcel(db);
+      setIsExportingExcel(false);
+      if (result && result.shared === false) {
+        Alert.alert('Файл сформирован', 'Отчет сохранен: ' + result.filename);
+      }
+    } catch (e) {
+      setIsExportingExcel(false);
+      Alert.alert('Ошибка экспорта', 'Не удалось сформировать Excel файл: ' + e.message);
+    }
+  };
+
   // --- ONBOARDING / NEW CAR WIZARD HANDLERS ---
   const saveOnboarding = () => {
     const name = obBrand.trim() && obModel.trim() ? (obBrand.trim() + ' ' + obModel.trim()) : (obBrand.trim() || obModel.trim() || 'Мой автомобиль');
@@ -256,16 +275,48 @@ export default function App() {
     inputBorder: isDark ? '#334155' : '#cbd5e1',
     success: '#10b981',
     warning: '#f59e0b',
-    danger: '#ef4444'
+    danger: '#ef4444',
+    purple: '#8b5cf6',
+    cyan: '#06b6d4',
+    pink: '#ec4899'
   };
 
   const activeVehicle = getActiveVehicle(db);
   const statusData = calculateDashboardStatus(db);
   const toGroups = getTOGroups(db);
+  const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === activeVehicle?.id);
+
+  // --- ANALYTICS & CHARTS DATA PREPARATION ---
+  const categoryColors = {
+    'Двигатель': '#06b6d4',
+    'Фильтры': '#8b5cf6',
+    'Охлаждение': '#10b981',
+    'Зажигание': '#f59e0b',
+    'Тормоза': '#ef4444',
+    'Трансмиссия': '#ec4899',
+    'Прочее': '#64748b'
+  };
+
+  // Group expenses by category
+  const categoryBreakdown = {};
+  records.forEach(r => {
+    const cat = r.category || 'Прочее';
+    if (!categoryBreakdown[cat]) {
+      categoryBreakdown[cat] = { category: cat, total: 0, count: 0, color: categoryColors[cat] || '#3b82f6' };
+    }
+    categoryBreakdown[cat].total += (Number(r.total_price) || 0);
+    categoryBreakdown[cat].count += 1;
+  });
+  const categoryList = Object.values(categoryBreakdown).sort((a, b) => b.total - a.total);
+  const totalCategorySpent = categoryList.reduce((sum, c) => sum + c.total, 0) || 1;
+
+  // TO Cost history (chronological for chart)
+  const toHistoryChronological = [...toGroups].reverse();
+  const maxTOSpent = toHistoryChronological.reduce((max, g) => Math.max(max, g.total_cost || 0), 0) || 1;
+  const avgTOCost = toGroups.length > 0 ? Math.round(statusData.kpi.total_spent / toGroups.length) : 0;
 
   // --- MILEAGE MODAL HANDLERS ---
   const openMileageModal = () => {
-    const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === activeVehicle?.id);
     const lastKm = records.reduce((max, r) => Math.max(max, Number(r.mileage) || 0), 0);
     const lastH = records.reduce((max, r) => Math.max(max, Number(r.engine_hours) || 0), 0);
 
@@ -278,7 +329,6 @@ export default function App() {
   const onMileageInputChange = (val) => {
     setInputKm(val);
     const num = parseInt(val, 10) || 0;
-    const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === activeVehicle?.id);
     const lastKm = records.reduce((max, r) => Math.max(max, Number(r.mileage) || 0), 0);
 
     if (lastKm > 0 && num > 0 && num < lastKm) {
@@ -763,7 +813,6 @@ export default function App() {
   };
 
   // Filtered parts for Tab 3
-  const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === activeVehicle?.id);
   const categoriesList = ['Все', 'Двигатель', 'Фильтры', 'Зажигание', 'Охлаждение', 'Тормоза', 'Трансмиссия', 'Прочее'];
   const filteredRecords = records.filter(r => {
     const matchCat = !categoryFilter || categoryFilter === 'Все' || r.category === categoryFilter;
@@ -779,7 +828,7 @@ export default function App() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.card} />
 
-      {/* --- TOP HEADER --- */}
+      {/* --- TOP HEADER (COMPACT NO-OVERLAP) --- */}
       <View style={[styles.topHeader, { backgroundColor: colors.card, borderBottomColor: colors.cardBorder }]}>
         <TouchableOpacity style={styles.headerLeft} onPress={() => setActiveTab('garage')} activeOpacity={0.7}>
           <View style={styles.carIconBox}>
@@ -803,14 +852,30 @@ export default function App() {
         </TouchableOpacity>
 
         <View style={styles.headerRight}>
+          {/* Quick Excel Export Button */}
+          <TouchableOpacity 
+            onPress={handleDownloadExcel} 
+            style={[styles.iconButton, { backgroundColor: '#10b98120', borderColor: '#10b981' }]}
+            activeOpacity={0.7}
+            disabled={isExportingExcel}
+          >
+            {isExportingExcel ? (
+              <ActivityIndicator size="small" color="#10b981" />
+            ) : (
+              <Text style={{ fontSize: 14 }}>📊</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Theme Toggle */}
           <TouchableOpacity 
             onPress={toggleTheme} 
             style={[styles.iconButton, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}
             activeOpacity={0.7}
           >
-            <Text style={{ fontSize: 15 }}>{isDark ? '☀️' : '🌙'}</Text>
+            <Text style={{ fontSize: 14 }}>{isDark ? '☀️' : '🌙'}</Text>
           </TouchableOpacity>
 
+          {/* Admin Auth Toggle */}
           <TouchableOpacity
             onPress={() => {
               if (isAdmin) {
@@ -830,7 +895,7 @@ export default function App() {
             ]}
             activeOpacity={0.7}
           >
-            <Text style={{ fontSize: 15 }}>{isAdmin ? '🔓' : '🔒'}</Text>
+            <Text style={{ fontSize: 14 }}>{isAdmin ? '🔓' : '🔒'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -838,7 +903,7 @@ export default function App() {
       {/* --- MAIN TAB CONTENT --- */}
       <ScrollView style={styles.mainScrollView} contentContainerStyle={{ paddingBottom: 95 }} showsVerticalScrollIndicator={false}>
         {/* ======================================================== */}
-        {/* TAB 1: DASHBOARD & TRAFFIC LIGHT                         */}
+        {/* TAB 1: DASHBOARD, TRAFFIC LIGHT & BEAUTIFUL CHARTS       */}
         {/* ======================================================== */}
         {activeTab === 'dashboard' && (
           <View style={styles.tabContent}>
@@ -872,12 +937,34 @@ export default function App() {
               </View>
             </View>
 
-            {/* Vehicle Oil Spec & Info Banner */}
-            {activeVehicle?.oil_spec ? (
-              <View style={[styles.infoBanner, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}>
-                <Text style={{ fontSize: 13 }}>🛢️ <Text style={{ fontWeight: 'bold', color: colors.text }}>Масло:</Text> <Text style={{ color: colors.textMuted }}>{activeVehicle.oil_spec}</Text></Text>
+            {/* Excel Download Banner Card */}
+            <TouchableOpacity 
+              onPress={handleDownloadExcel}
+              style={[styles.excelBannerCard, { backgroundColor: colors.card, borderColor: '#10b98150' }]}
+              activeOpacity={0.8}
+              disabled={isExportingExcel}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                <View style={styles.excelIconCircle}>
+                  <Text style={{ fontSize: 20 }}>📊</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.excelBannerTitle, { color: colors.text }]}>
+                    Скачать полный отчет в Excel (.xlsx)
+                  </Text>
+                  <Text style={[styles.excelBannerSub, { color: colors.textMuted }]}>
+                    Сводка KPI, светофор расходников, журнал ТО и реестр деталей
+                  </Text>
+                </View>
               </View>
-            ) : null}
+              {isExportingExcel ? (
+                <ActivityIndicator size="small" color="#10b981" />
+              ) : (
+                <View style={styles.downloadBadge}>
+                  <Text style={styles.downloadBadgeText}>📥 Скачать</Text>
+                </View>
+              )}
+            </TouchableOpacity>
 
             {/* Setup vehicle prompt if fresh clean car */}
             {!activeVehicle?.brand && (
@@ -891,85 +978,287 @@ export default function App() {
               </TouchableOpacity>
             )}
 
-            {/* Traffic-Light Status Section Header */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, marginTop: 4 }}>
-              <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                Ресурс расходников («Светофор»)
-              </Text>
-              <View style={styles.attentionPill}>
-                <Text style={styles.attentionPillText}>
-                  {statusData.kpi.attention_count > 0 ? ('⚠️ Внимание: ' + statusData.kpi.attention_count) : '✅ Всё в норме'}
+            {/* Dashboard View Toggle Pills */}
+            <View style={styles.viewToggleRow}>
+              <TouchableOpacity
+                onPress={() => setDashboardView('all')}
+                style={[
+                  styles.viewTogglePill,
+                  {
+                    backgroundColor: dashboardView === 'all' ? '#3b82f6' : colors.card,
+                    borderColor: dashboardView === 'all' ? '#3b82f6' : colors.cardBorder
+                  }
+                ]}
+              >
+                <Text style={[styles.viewToggleText, { color: dashboardView === 'all' ? '#fff' : colors.textMuted }]}>
+                  Все разделы
                 </Text>
-              </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setDashboardView('traffic-light')}
+                style={[
+                  styles.viewTogglePill,
+                  {
+                    backgroundColor: dashboardView === 'traffic-light' ? '#3b82f6' : colors.card,
+                    borderColor: dashboardView === 'traffic-light' ? '#3b82f6' : colors.cardBorder
+                  }
+                ]}
+              >
+                <Text style={[styles.viewToggleText, { color: dashboardView === 'traffic-light' ? '#fff' : colors.textMuted }]}>
+                  🚦 Светофор ({statusData.consumables.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setDashboardView('charts')}
+                style={[
+                  styles.viewTogglePill,
+                  {
+                    backgroundColor: dashboardView === 'charts' ? '#3b82f6' : colors.card,
+                    borderColor: dashboardView === 'charts' ? '#3b82f6' : colors.cardBorder
+                  }
+                ]}
+              >
+                <Text style={[styles.viewToggleText, { color: dashboardView === 'charts' ? '#fff' : colors.textMuted }]}>
+                  📊 Графики
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Consumables Traffic-Light Cards */}
-            {statusData.consumables.map(c => {
-              const isWarning = c.status_code === 'warning';
-              const isDanger = c.status_code === 'danger';
-              const badgeBg = isDanger ? '#ef444420' : isWarning ? '#f59e0b20' : '#10b98120';
-              const badgeColor = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
-              const barColor = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
+            {/* ======================================================== */}
+            {/* CHARTS SECTION                                           */}
+            {/* ======================================================== */}
+            {(dashboardView === 'all' || dashboardView === 'charts') && (
+              <View style={{ marginBottom: 14 }}>
+                {/* 1. Category Expense Breakdown Chart Card */}
+                <View style={[styles.chartCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <View style={styles.chartCardHeader}>
+                    <View>
+                      <Text style={[styles.chartCardTitle, { color: colors.text }]}>
+                        🍩 Структура расходов по категориям
+                      </Text>
+                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                        Всего затрат: {Number(statusData.kpi.total_spent).toLocaleString('ru-RU')} ₽
+                      </Text>
+                    </View>
+                  </View>
 
-              return (
-                <View key={c.id} style={[styles.consumableCard, { backgroundColor: colors.card, borderColor: isDanger ? '#ef444460' : colors.cardBorder }]}>
-                  <View style={styles.consumableHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                      <Text style={{ fontSize: 24 }}>{c.icon}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.consumableTitle, { color: colors.text }]}>{c.name}</Text>
-                        <Text style={[styles.consumableSub, { color: colors.textMuted }]}>
-                          {c.brand ? (c.brand + ' ') : ''}{c.article ? ('• ' + c.article) : ''}
-                        </Text>
+                  {categoryList.length === 0 ? (
+                    <Text style={{ fontSize: 12, color: colors.textMuted, paddingVertical: 10, textAlign: 'center' }}>
+                      Нет проведенных ТО для построения диаграммы
+                    </Text>
+                  ) : (
+                    <View style={{ marginTop: 8 }}>
+                      {/* Multi-segment ratio visual bar */}
+                      <View style={styles.stackedBarContainer}>
+                        {categoryList.map(cat => {
+                          const pct = Math.max(2, Math.round((cat.total / totalCategorySpent) * 100));
+                          return (
+                            <View 
+                              key={cat.category}
+                              style={{
+                                width: pct + '%',
+                                height: 12,
+                                backgroundColor: cat.color,
+                                borderRightWidth: 1,
+                                borderRightColor: colors.card
+                              }}
+                            />
+                          );
+                        })}
+                      </View>
+
+                      {/* Category Legend Rows */}
+                      <View style={{ marginTop: 12, gap: 8 }}>
+                        {categoryList.map(cat => {
+                          const pct = Math.round((cat.total / totalCategorySpent) * 100);
+                          return (
+                            <View key={cat.category} style={styles.categoryChartRow}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                                <View style={[styles.categoryColorDot, { backgroundColor: cat.color }]} />
+                                <Text style={[styles.categoryChartName, { color: colors.text }]}>{cat.category}</Text>
+                                <Text style={{ fontSize: 11, color: colors.textMuted }}>({cat.count} дет.)</Text>
+                              </View>
+
+                              <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={[styles.categoryChartSum, { color: colors.text }]}>
+                                  {Number(cat.total).toLocaleString('ru-RU')} ₽
+                                </Text>
+                                <Text style={{ fontSize: 10, color: colors.textMuted, fontWeight: 'bold' }}>
+                                  {pct}% бюджета
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })}
                       </View>
                     </View>
-                    <View style={[styles.statusBadge, { backgroundColor: badgeBg, borderColor: badgeColor }]}>
-                      <Text style={[styles.statusBadgeText, { color: badgeColor }]}>
-                        {isDanger ? '🔴 ' : isWarning ? '🟡 ' : '🟢 '}{c.status_text}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Progress bar */}
-                  <View style={styles.progressContainer}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                        Износ ресурса ({c.interval_km} км {c.interval_hours > 0 ? ('/ ' + c.interval_hours + ' ч') : ''}):
-                      </Text>
-                      <Text style={{ fontSize: 12, fontWeight: 'bold', color: badgeColor }}>{c.wear_percent}%</Text>
-                    </View>
-                    <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#0b1120' : '#e2e8f0' }]}>
-                      <View style={[styles.progressBarFill, { width: Math.min(100, c.wear_percent) + '%', backgroundColor: barColor }]} />
-                    </View>
-                  </View>
-
-                  {/* Details grid */}
-                  <View style={[styles.consumableDetails, { borderTopColor: colors.cardBorder }]}>
-                    <View>
-                      <Text style={{ fontSize: 10, color: colors.textMuted }}>Осталось до замены:</Text>
-                      <Text style={{ fontSize: 13, fontWeight: 'bold', color: badgeColor }}>
-                        {Number(c.rem_km).toLocaleString('ru-RU')} км {c.rem_hours !== null ? ('(' + c.rem_hours + ' м/ч)') : ''}
-                      </Text>
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={{ fontSize: 10, color: colors.textMuted }}>Замена на одометре:</Text>
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text }}>
-                        {Number(c.next_km).toLocaleString('ru-RU')} км {c.next_hours ? ('(' + c.next_hours + ' м/ч)') : ''}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Last replaced info */}
-                  {c.last_km > 0 ? (
-                    <View style={styles.lastReplacedRow}>
-                      <Text style={{ fontSize: 10, color: colors.textMuted }}>
-                        Заменено на {c.to_tag} ({c.last_date} • {Number(c.last_km).toLocaleString('ru-RU')} км)
-                      </Text>
-                    </View>
-                  ) : null}
+                  )}
                 </View>
-              );
-            })}
+
+                {/* 2. TO Cost Dynamics Bar Chart Card */}
+                <View style={[styles.chartCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <View style={styles.chartCardHeader}>
+                    <View>
+                      <Text style={[styles.chartCardTitle, { color: colors.text }]}>
+                        📊 Динамика стоимости ТО
+                      </Text>
+                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                        Средний чек ТО: {Number(avgTOCost).toLocaleString('ru-RU')} ₽
+                      </Text>
+                    </View>
+                  </View>
+
+                  {toHistoryChronological.length === 0 ? (
+                    <Text style={{ fontSize: 12, color: colors.textMuted, paddingVertical: 10, textAlign: 'center' }}>
+                      Добавьте события ТО для отображения графика
+                    </Text>
+                  ) : (
+                    <View style={styles.barChartContainer}>
+                      {toHistoryChronological.map((g, idx) => {
+                        const heightPct = Math.max(15, Math.min(100, Math.round((g.total_cost / maxTOSpent) * 100)));
+                        return (
+                          <View key={g.to_tag || idx} style={styles.barColumn}>
+                            <Text style={[styles.barValueText, { color: colors.success }]}>
+                              {Number(g.total_cost).toLocaleString('ru-RU')} ₽
+                            </Text>
+
+                            <View style={[styles.barTrack, { backgroundColor: isDark ? '#0f172a' : '#e2e8f0' }]}>
+                              <View style={[styles.barFill, { height: heightPct + '%', backgroundColor: '#3b82f6' }]} />
+                            </View>
+
+                            <Text style={[styles.barLabelText, { color: colors.text }]}>{g.to_tag}</Text>
+                            <Text style={[styles.barSubLabelText, { color: colors.textMuted }]}>
+                              {Number(g.mileage).toLocaleString('ru-RU')} км
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+
+                {/* 3. Fleet Health Status Meter */}
+                <View style={[styles.chartCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                  <Text style={[styles.chartCardTitle, { color: colors.text, marginBottom: 8 }]}>
+                    🚦 Индекс состояния расходников
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={[styles.healthStatCard, { backgroundColor: '#10b98115', borderColor: '#10b98150' }]}>
+                      <Text style={{ fontSize: 18 }}>🟢</Text>
+                      <Text style={[styles.healthStatNum, { color: '#10b981' }]}>
+                        {statusData.consumables.filter(c => c.status_code === 'ok').length}
+                      </Text>
+                      <Text style={[styles.healthStatLabel, { color: colors.textMuted }]}>В норме</Text>
+                    </View>
+
+                    <View style={[styles.healthStatCard, { backgroundColor: '#f59e0b15', borderColor: '#f59e0b50' }]}>
+                      <Text style={{ fontSize: 18 }}>🟡</Text>
+                      <Text style={[styles.healthStatNum, { color: '#f59e0b' }]}>
+                        {statusData.consumables.filter(c => c.status_code === 'warning').length}
+                      </Text>
+                      <Text style={[styles.healthStatLabel, { color: colors.textMuted }]}>Скоро замена</Text>
+                    </View>
+
+                    <View style={[styles.healthStatCard, { backgroundColor: '#ef444415', borderColor: '#ef444450' }]}>
+                      <Text style={{ fontSize: 18 }}>🔴</Text>
+                      <Text style={[styles.healthStatNum, { color: '#ef4444' }]}>
+                        {statusData.consumables.filter(c => c.status_code === 'danger').length}
+                      </Text>
+                      <Text style={[styles.healthStatLabel, { color: colors.textMuted }]}>Замена</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* ======================================================== */}
+            {/* TRAFFIC LIGHT CONSUMABLES SECTION                        */}
+            {/* ======================================================== */}
+            {(dashboardView === 'all' || dashboardView === 'traffic-light') && (
+              <View>
+                {/* Traffic-Light Status Section Header */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, marginTop: 4 }}>
+                  <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+                    Ресурс расходников («Светофор»)
+                  </Text>
+                  <View style={styles.attentionPill}>
+                    <Text style={styles.attentionPillText}>
+                      {statusData.kpi.attention_count > 0 ? ('⚠️ Внимание: ' + statusData.kpi.attention_count) : '✅ Всё в норме'}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Consumables Traffic-Light Cards */}
+                {statusData.consumables.map(c => {
+                  const isWarning = c.status_code === 'warning';
+                  const isDanger = c.status_code === 'danger';
+                  const badgeBg = isDanger ? '#ef444420' : isWarning ? '#f59e0b20' : '#10b98120';
+                  const badgeColor = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
+                  const barColor = isDanger ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981';
+
+                  return (
+                    <View key={c.id} style={[styles.consumableCard, { backgroundColor: colors.card, borderColor: isDanger ? '#ef444460' : colors.cardBorder }]}>
+                      <View style={styles.consumableHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                          <Text style={{ fontSize: 24 }}>{c.icon}</Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.consumableTitle, { color: colors.text }]}>{c.name}</Text>
+                            <Text style={[styles.consumableSub, { color: colors.textMuted }]}>
+                              {c.brand ? (c.brand + ' ') : ''}{c.article ? ('• ' + c.article) : ''}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={[styles.statusBadge, { backgroundColor: badgeBg, borderColor: badgeColor }]}>
+                          <Text style={[styles.statusBadgeText, { color: badgeColor }]}>
+                            {isDanger ? '🔴 ' : isWarning ? '🟡 ' : '🟢 '}{c.status_text}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Progress bar */}
+                      <View style={styles.progressContainer}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                            Износ ресурса ({c.interval_km} км {c.interval_hours > 0 ? ('/ ' + c.interval_hours + ' ч') : ''}):
+                          </Text>
+                          <Text style={{ fontSize: 12, fontWeight: 'bold', color: badgeColor }}>{c.wear_percent}%</Text>
+                        </View>
+                        <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#0b1120' : '#e2e8f0' }]}>
+                          <View style={[styles.progressBarFill, { width: Math.min(100, c.wear_percent) + '%', backgroundColor: barColor }]} />
+                        </View>
+                      </View>
+
+                      {/* Details grid */}
+                      <View style={[styles.consumableDetails, { borderTopColor: colors.cardBorder }]}>
+                        <View>
+                          <Text style={{ fontSize: 10, color: colors.textMuted }}>Осталось до замены:</Text>
+                          <Text style={{ fontSize: 13, fontWeight: 'bold', color: badgeColor }}>
+                            {Number(c.rem_km).toLocaleString('ru-RU')} км {c.rem_hours !== null ? ('(' + c.rem_hours + ' м/ч)') : ''}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={{ fontSize: 10, color: colors.textMuted }}>Замена на одометре:</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text }}>
+                            {Number(c.next_km).toLocaleString('ru-RU')} км {c.next_hours ? ('(' + c.next_hours + ' м/ч)') : ''}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Last replaced info */}
+                      {c.last_km > 0 ? (
+                        <View style={styles.lastReplacedRow}>
+                          <Text style={{ fontSize: 10, color: colors.textMuted }}>
+                            Заменено на {c.to_tag} ({c.last_date} • {Number(c.last_km).toLocaleString('ru-RU')} км)
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </View>
         )}
 
@@ -1140,6 +1429,35 @@ export default function App() {
         {/* ======================================================== */}
         {activeTab === 'settings' && (
           <View style={styles.tabContent}>
+            {/* Excel Download Full Card */}
+            <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: '#10b98160' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <Text style={{ fontSize: 22 }}>📊</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.settingsTitle, { color: colors.text, marginBottom: 0 }]}>
+                    Экспорт отчета в Excel (.xlsx)
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                    Формирует структурированную книгу Excel с 4 листами
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity 
+                onPress={handleDownloadExcel} 
+                style={[styles.saveBtn, { backgroundColor: '#10b981', flexDirection: 'row', justifyContent: 'center', gap: 8 }]}
+                disabled={isExportingExcel}
+              >
+                {isExportingExcel ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Text style={{ fontSize: 15 }}>📥</Text>
+                    <Text style={styles.saveBtnText}>Сформировать и скачать Excel</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
             {/* Quick Initial Setup / Demo actions */}
             <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               <Text style={[styles.settingsTitle, { color: colors.text }]}>🚗 Настройка автомобиля и Данные</Text>
@@ -1571,7 +1889,7 @@ export default function App() {
                   style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.cardBorder, color: colors.text }]}
                   value={toDate}
                   onChangeText={setToDate}
-                  placeholder="2026-08-27"
+                  placeholder="2026-08-28"
                   placeholderTextColor={colors.textMuted}
                 />
               </View>
@@ -2065,7 +2383,7 @@ const styles = StyleSheet.create({
   kpiGrid: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   kpiCard: {
     flex: 1,
@@ -2097,6 +2415,155 @@ const styles = StyleSheet.create({
   kpiSub: {
     fontSize: 11,
     marginTop: 4,
+    fontWeight: '500',
+  },
+  excelBannerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    marginBottom: 12,
+  },
+  excelIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#10b98120',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  excelBannerTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  excelBannerSub: {
+    fontSize: 10,
+    marginTop: 1,
+  },
+  downloadBadge: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  downloadBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  viewToggleRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 12,
+  },
+  viewTogglePill: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewToggleText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  chartCard: {
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  chartCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  chartCardTitle: {
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  stackedBarContainer: {
+    flexDirection: 'row',
+    height: 12,
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  categoryChartRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  categoryColorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  categoryChartName: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  categoryChartSum: {
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  barChartContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'flex-end',
+    height: 140,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  barColumn: {
+    alignItems: 'center',
+    flex: 1,
+    height: '100%',
+    justifyContent: 'flex-end',
+  },
+  barValueText: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  barTrack: {
+    width: 22,
+    height: 75,
+    borderRadius: 6,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  barFill: {
+    width: '100%',
+    borderRadius: 6,
+  },
+  barLabelText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginTop: 6,
+  },
+  barSubLabelText: {
+    fontSize: 9,
+  },
+  healthStatCard: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  healthStatNum: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginVertical: 2,
+  },
+  healthStatLabel: {
+    fontSize: 10,
     fontWeight: '500',
   },
   infoBanner: {
