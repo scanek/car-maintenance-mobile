@@ -1,3 +1,29 @@
+
+// Universal Tracker Icon Helper (Converts Web Lucide icons, keywords or emojis to clean mobile emojis)
+const getTrackerIcon = (icon) => {
+  if (!icon) return '⚙️';
+  if (/\p{Extended_Pictographic}|\p{Emoji}/u.test(icon) && !/^[a-zA-Z0-9_-]+$/.test(icon)) {
+    return icon;
+  }
+  const map = {
+    'droplet': '💧', 'oil': '💧', 'масло': '💧',
+    'disc': '💿', 'filter': '💿', 'фильтр': '💿',
+    'wind': '💨', 'air': '💨', 'воздух': '💨',
+    'fan': '🪟', 'cabin': '🪟', 'салон': '🪟',
+    'zap': '⚡', 'spark': '⚡', 'свечи': '⚡',
+    'thermometer': '🌡️', 'antifreeze': '🌡️', 'антифриз': '🌡️',
+    'shield-alert': '🛡️', 'brake': '🛡️', 'тормоз': '🛡️',
+    'cog': '⚙️', 'transmission': '⚙️', 'кпп': '⚙️', 'ркпп': '⚙️',
+    'battery-charging': '🔋', 'battery': '🔋', 'акб': '🔋',
+    'disc-3': '🛞', 'tyre': '🛞', 'шины': '🛞',
+    'repeat': '🔁', 'belt': '🔁', 'грм': '🔁',
+    'sliders': '🎛️', 'подвеска': '🎛️',
+    'wrench': '🔧', 'tool': '🔧', 'прочее': '🔧'
+  };
+  const clean = String(icon).toLowerCase().trim();
+  return map[clean] || '⚙️';
+};
+
 import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
