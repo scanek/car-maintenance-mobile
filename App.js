@@ -1552,6 +1552,41 @@ export default function App() {
                 </TouchableOpacity>
               </View>
             </View>
+
+            {/* About App & Developer Info Card */}
+            <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: '#3b82f640' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <Text style={{ fontSize: 24 }}>👨‍💻</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.settingsTitle, { color: colors.text, marginBottom: 1 }]}>
+                    О приложении и Разработчик
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                    Авто ТО v1.0.4 • 100% Offline-First
+                  </Text>
+                </View>
+              </View>
+
+              <View style={[styles.developerInfoBox, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: colors.text }}>
+                    Разработчик:
+                  </Text>
+                  <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#3b82f6' }}>
+                    Александр Щеголев
+                  </Text>
+                  <View style={styles.devBadge}>
+                    <Text style={styles.devBadgeText}>@scanek</Text>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 11, color: colors.textMuted, lineHeight: 16 }}>
+                  Полностью автономное мобильное приложение для учета технического обслуживания (ТО) и контроля ресурса расходников автомобиля.
+                </Text>
+                <Text style={{ fontSize: 10, color: '#3b82f6', marginTop: 6, fontWeight: '600' }}>
+                  ⭐ Репозиторий: github.com/scanek/car-maintenance-mobile
+                </Text>
+              </View>
+            </View>
           </View>
         )}
 
@@ -2929,5 +2964,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  developerInfoBox: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  devBadge: {
+    backgroundColor: '#2563eb20',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  devBadgeText: {
+    color: '#3b82f6',
+    fontSize: 10,
+    fontWeight: 'bold',
   }
 });

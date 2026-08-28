@@ -94,5 +94,13 @@ car-maintenance-mobile/
 
 ---
 
+## 👨‍💻 Разработчик
+
+* **Автор:** Александр Щеголев
+* **GitHub:** [@scanek](https://github.com/scanek)
+* **Репозиторий:** [scanek/car-maintenance-mobile](https://github.com/scanek/car-maintenance-mobile)
+
+---
+
 ## 📜 Лицензия
-MIT License © 2026
+MIT License © 2026 Александр Щеголев (@scanek)
