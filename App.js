@@ -21,7 +21,10 @@ import {
   calculateDashboardStatus,
   getTOGroups,
   DEFAULT_CLEAN_DB,
-  DEMO_DB
+  DEMO_DB,
+  exportBackupFile,
+  pickAndImportBackupFile,
+  normalizeImportedBackup
 } from './src/storage';
 import { exportToExcel } from './src/excelExport';
 
@@ -736,35 +739,51 @@ export default function App() {
     });
   };
 
-  // --- BACKUP EXPORT & IMPORT ---
-  const exportBackup = async () => {
+  // --- BACKUP EXPORT & IMPORT (100% UNIFIED WEB & ANDROID COMPATIBLE) ---
+  const handleExportBackup = async () => {
     try {
-      const jsonStr = JSON.stringify(db, null, 2);
-      await Share.share({
-        message: jsonStr,
-        title: 'car_maintenance_backup_' + new Date().toISOString().split('T')[0] + '.json'
-      });
+      const res = await exportBackupFile(db);
+      if (res && res.shared === false) {
+        Alert.alert('Файл сохранен', 'Резервная копия сохранена в файл: ' + res.filename);
+      }
     } catch (e) {
-      Alert.alert('Ошибка экспорта', e.message);
+      Alert.alert('Ошибка экспорта', 'Не удалось экспортировать файл: ' + e.message);
     }
   };
 
-  const handleImportBackup = () => {
-    requireAuth(() => {
-      try {
-        const parsed = JSON.parse(importJsonText);
-        if (!parsed.vehicles || !parsed.trackers) {
-          Alert.alert('Ошибка', 'Некорректная структура файла бэкапа JSON');
-          return;
-        }
-        updateDb(parsed);
+  const handlePickAndImportBackup = async () => {
+    try {
+      const res = await pickAndImportBackupFile();
+      if (res.canceled) return;
+      if (res.success && res.db) {
+        updateDb(res.db);
         setImportModalVisible(false);
-        setImportJsonText('');
-        Alert.alert('Успешно', 'База данных успешно восстановлена из бэкапа!');
-      } catch (e) {
-        Alert.alert('Ошибка парсинга', 'Введен некорректный JSON текст');
+        const carCount = res.db.vehicles?.length || 1;
+        const recCount = res.db.maintenance_records?.length || 0;
+        Alert.alert('Успешно', \`База данных успешно загружена из файла "${res.filename}"!\\n\\n🚗 Автомобилей: ${carCount}\\n📋 Записей ТО и расходов: ${recCount}\`);
       }
-    });
+    } catch (e) {
+      Alert.alert('Ошибка импорта', 'Не удалось загрузить бэкап: ' + e.message);
+    }
+  };
+
+  const handleImportBackupText = () => {
+    if (!importJsonText.trim()) {
+      Alert.alert('Внимание', 'Пожалуйста, вставьте текст JSON или выберите файл бэкапа');
+      return;
+    }
+    try {
+      const parsed = JSON.parse(importJsonText);
+      const normalized = normalizeImportedBackup(parsed);
+      updateDb(normalized);
+      setImportModalVisible(false);
+      setImportJsonText('');
+      const carCount = normalized.vehicles?.length || 1;
+      const recCount = normalized.maintenance_records?.length || 0;
+      Alert.alert('Успешно', \`База данных успешно восстановлена!\\n\\n🚗 Автомобилей: ${carCount}\\n📋 Записей ТО и расходов: ${recCount}\`);
+    } catch (e) {
+      Alert.alert('Ошибка парсинга', 'Некорректный JSON файл: ' + e.message);
+    }
   };
 
   // Filtered parts for Tab 3
@@ -1442,21 +1461,38 @@ export default function App() {
             </View>
 
 
-            {/* Backup & Export / Import Card */}
-            <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-              <Text style={[styles.settingsTitle, { color: colors.text }]}>💾 Резервное копирование и Восстановление</Text>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 12 }}>
-                100% автономное сохранение: экспортируйте базу в файл JSON или восстановите данные на любом устройстве.
-              </Text>
+            {/* Unified Backup & Sync Card (Web <-> Mobile) */}
+            <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: '#10b98150' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <Text style={{ fontSize: 24 }}>🔄</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.settingsTitle, { color: colors.text, marginBottom: 2 }]}>
+                    Синхронизация и Бэкап (Web ↔ Android)
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                    Единый формат бэкапа JSON — 100% совместимость с веб-версией и мобильным приложением.
+                  </Text>
+                </View>
+              </View>
 
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TouchableOpacity onPress={exportBackup} style={[styles.saveBtn, { flex: 1, backgroundColor: '#10b981' }]}>
-                  <Text style={styles.saveBtnText}>📤 Экспорт JSON</Text>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+                <TouchableOpacity onPress={handleExportBackup} style={[styles.saveBtn, { flex: 1, backgroundColor: '#10b981' }]} activeOpacity={0.8}>
+                  <Text style={styles.saveBtnText}>📤 Экспорт .JSON</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setImportModalVisible(true)} style={[styles.saveBtn, { flex: 1, backgroundColor: '#3b82f6' }]}>
-                  <Text style={styles.saveBtnText}>📥 Импорт JSON</Text>
+                <TouchableOpacity onPress={handlePickAndImportBackup} style={[styles.saveBtn, { flex: 1, backgroundColor: '#3b82f6' }]} activeOpacity={0.8}>
+                  <Text style={styles.saveBtnText}>📂 Загрузить .JSON</Text>
                 </TouchableOpacity>
               </View>
+
+              <TouchableOpacity 
+                onPress={() => setImportModalVisible(true)} 
+                style={{ marginTop: 10, paddingVertical: 6, alignItems: 'center' }}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 11, color: '#3b82f6', textDecorationLine: 'underline' }}>
+                  Или вставить JSON вручную текстом 📋
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {/* About App & Developer Info Card */}
@@ -1468,7 +1504,7 @@ export default function App() {
                     О приложении и Разработчик
                   </Text>
                   <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                    Авто ТО v1.0.5 • 100% Offline-First
+                    Авто ТО v1.0.6 • 100% Offline-First
                   </Text>
                 </View>
               </View>
@@ -2167,15 +2203,24 @@ export default function App() {
         </View>
       </Modal>
 
-      {/* --- MODAL: IMPORT JSON BACKUP --- */}
+      {/* --- MODAL: IMPORT JSON BACKUP (UNIFIED WEB & MOBILE) --- */}
       <Modal visible={importModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: colors.card, maxHeight: '85%' }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>📥 Импорт базы данных JSON</Text>
-            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 10 }}>
-              Вставьте текст резервной копии JSON ниже для восстановления базы данных:
+            <Text style={[styles.modalTitle, { color: colors.text }]}>📥 Импорт бэкапа JSON</Text>
+            <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12 }}>
+              Выберите файл бэкапа (.json), выгруженный из веб-версии или мобильного приложения, или вставьте его содержимое:
             </Text>
 
+            <TouchableOpacity 
+              onPress={handlePickAndImportBackup} 
+              style={[styles.saveBtn, { backgroundColor: '#3b82f6', marginBottom: 14, paddingVertical: 12 }]}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.saveBtnText, { fontSize: 13 }]}>📂 Выбрать файл .json с устройства</Text>
+            </TouchableOpacity>
+
+            <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 6 }}>Или вставьте текст JSON вручную:</Text>
             <TextInput
               style={[
                 styles.modalInput,
@@ -2183,14 +2228,14 @@ export default function App() {
                   backgroundColor: colors.inputBg,
                   borderColor: colors.inputBorder,
                   color: colors.text,
-                  height: 150,
+                  height: 120,
                   textAlignVertical: 'top',
                   fontFamily: 'monospace',
                   fontSize: 11
                 }
               ]}
               multiline
-              placeholder='{"active_vehicle_id": "car_1", "vehicles": [...] ...}'
+              placeholder='{"version": "2.5", "app": "car-maintenance-app", "vehicle": {...}, "maintenance_records": [...] ...}'
               placeholderTextColor={colors.textMuted}
               value={importJsonText}
               onChangeText={setImportJsonText}
@@ -2200,7 +2245,7 @@ export default function App() {
               <TouchableOpacity onPress={() => setImportModalVisible(false)} style={styles.modalCancelBtn}>
                 <Text style={{ color: colors.textMuted, fontWeight: 'bold' }}>Отмена</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={handleImportBackup} style={[styles.modalConfirmBtn, { backgroundColor: '#10b981' }]}>
+              <TouchableOpacity onPress={handleImportBackupText} style={[styles.modalConfirmBtn, { backgroundColor: '#10b981' }]}>
                 <Text style={{ color: '#fff', fontWeight: 'bold' }}>Восстановить</Text>
               </TouchableOpacity>
             </View>
