@@ -27,6 +27,7 @@ import {
   normalizeImportedBackup
 } from './src/storage';
 import { exportToExcel } from './src/excelExport';
+import { requestNotificationPermissions, sendTestNotification, checkAndNotifyUpcomingTO } from './src/notifications';
 
 export default function App() {
   const [db, setDb] = useState(null);
@@ -34,6 +35,9 @@ export default function App() {
   const [dashboardView, setDashboardView] = useState('all'); // 'all', 'traffic-light', 'charts'
   const [theme, setTheme] = useState('dark');
   const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [notifEnabled, setNotifEnabled] = useState(true);
+  const [notifWarnKm, setNotifWarnKm] = useState('1000');
+  const [notifWarnHours, setNotifWarnHours] = useState('30');
 
   // Onboarding Wizard Modal
   const [onboardingModalVisible, setOnboardingModalVisible] = useState(false);
@@ -103,6 +107,15 @@ export default function App() {
     const loaded = await loadDatabase();
     setDb(loaded);
     if (loaded && loaded.theme) setTheme(loaded.theme);
+    if (loaded && loaded.notification_settings) {
+      setNotifEnabled(loaded.notification_settings.enabled !== false);
+      setNotifWarnKm(String(loaded.notification_settings.default_warn_km || '1000'));
+      setNotifWarnHours(String(loaded.notification_settings.default_warn_hours || '30'));
+    }
+    // Check and trigger upcoming maintenance alerts
+    setTimeout(() => {
+      checkAndNotifyUpcomingTO(loaded);
+    }, 1500);
 
     // Show initial car setup wizard if not onboarded yet
     if (!loaded || loaded.is_onboarded === false) {
@@ -136,6 +149,50 @@ export default function App() {
     setTheme(next);
     if (db) {
       updateDb({ ...db, theme: next });
+    }
+  };
+
+  // --- NOTIFICATION SETTINGS HANDLERS ---
+  const handleSaveNotifSettings = (applyToAllTrackers = false) => {
+    const km = Number(notifWarnKm) || 1000;
+    const hours = Number(notifWarnHours) || 30;
+    
+    let updatedTrackers = db.trackers || [];
+    if (applyToAllTrackers) {
+      updatedTrackers = updatedTrackers.map(t => ({
+        ...t,
+        warn_km: km,
+        warn_hours: t.interval_hours > 0 ? hours : 0
+      }));
+    }
+
+    const updatedDb = {
+      ...db,
+      trackers: updatedTrackers,
+      notification_settings: {
+        enabled: notifEnabled,
+        default_warn_km: km,
+        default_warn_hours: hours
+      }
+    };
+
+    updateDb(updatedDb);
+    if (applyToAllTrackers) {
+      Alert.alert('Настройки сохранены', 'Пороги предупреждения (' + km + ' км / ' + hours + ' м/ч) применены ко всем регламентам ТО!');
+    } else {
+      Alert.alert('Успешно', 'Параметры уведомлений обновлены!');
+    }
+
+    checkAndNotifyUpcomingTO(updatedDb);
+  };
+
+  const handleTestNotification = async () => {
+    try {
+      const carName = activeVehicle?.name || 'Changan CS55 Plus';
+      await sendTestNotification(carName, notifWarnKm, notifWarnHours);
+      Alert.alert('Уведомление отправлено', 'Проверьте шторку уведомлений на вашем смартфоне 🔔');
+    } catch (e) {
+      Alert.alert('Ошибка отправки', e.message);
     }
   };
 
@@ -185,6 +242,7 @@ export default function App() {
     };
 
     updateDb(newDb);
+    checkAndNotifyUpcomingTO(newDb);
     setOnboardingModalVisible(false);
     Alert.alert('Успешно', 'Автомобиль ' + name + ' готов к учету!');
   };
@@ -858,6 +916,38 @@ export default function App() {
         {/* ======================================================== */}
         {activeTab === 'dashboard' && (
           <View style={styles.tabContent}>
+                        {/* --- UPCOMING MAINTENANCE ALERT BANNER --- */}
+            {statusData.kpi.attention_count > 0 && (
+              <TouchableOpacity
+                onPress={() => setDashboardView('traffic-light')}
+                style={{
+                  backgroundColor: '#ef444418',
+                  borderColor: '#ef4444',
+                  borderWidth: 1.5,
+                  borderRadius: 14,
+                  padding: 12,
+                  marginBottom: 14,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontSize: 24 }}>🚨</Text>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#ef4444' }}>
+                      Внимание: приближается срок ТО ({statusData.kpi.attention_count} поз.)
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 11, color: colors.text, marginTop: 2 }} numberOfLines={2}>
+                    {statusData.consumables.filter(c => c.status_code !== 'ok').map(c => c.name + ' (' + (c.rem_km > 0 ? (c.rem_km + ' км') : 'замена') + ')').join(' • ')}
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 11, color: '#3b82f6', fontWeight: 'bold' }}>Смотреть ➔</Text>
+              </TouchableOpacity>
+            )}
+
             {/* KPI Cards Grid */}
             <View style={styles.kpiGrid}>
               {/* Mileage & Hours */}
@@ -1461,6 +1551,100 @@ export default function App() {
             </View>
 
 
+                        {/* Upcoming Maintenance Notification Settings Card */}
+            <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: '#3b82f650' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <Text style={{ fontSize: 24 }}>🔔</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.settingsTitle, { color: colors.text, marginBottom: 2 }]}>
+                    Уведомления о предстоящем ТО
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                    Автоматические push-напоминания при приближении срока замены расходников.
+                  </Text>
+                </View>
+              </View>
+
+              {/* Notification Enable Toggle */}
+              <TouchableOpacity
+                onPress={() => setNotifEnabled(!notifEnabled)}
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingVertical: 10,
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.cardBorder,
+                  marginBottom: 12
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: 13, fontWeight: 'bold', color: colors.text }}>
+                  Push-уведомления на смартфоне:
+                </Text>
+                <View style={{
+                  backgroundColor: notifEnabled ? '#10b98120' : colors.cardSecondary,
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: notifEnabled ? '#10b981' : colors.cardBorder
+                }}>
+                  <Text style={{ fontSize: 11, fontWeight: 'bold', color: notifEnabled ? '#10b981' : colors.textMuted }}>
+                    {notifEnabled ? '🟢 ВКЛЮЧЕНЫ' : '⚪ ВЫКЛЮЧЕНЫ'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Threshold inputs */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>
+                    Предупреждать за (км):
+                  </Text>
+                  <TextInput
+                    style={[styles.settingInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontWeight: 'bold', marginBottom: 0 }]}
+                    keyboardType="numeric"
+                    placeholder="1000"
+                    placeholderTextColor={colors.textMuted}
+                    value={notifWarnKm}
+                    onChangeText={setNotifWarnKm}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4 }}>
+                    Предупреждать за (м/ч):
+                  </Text>
+                  <TextInput
+                    style={[styles.settingInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontWeight: 'bold', marginBottom: 0 }]}
+                    keyboardType="numeric"
+                    placeholder="30"
+                    placeholderTextColor={colors.textMuted}
+                    value={notifWarnHours}
+                    onChangeText={setNotifWarnHours}
+                  />
+                </View>
+              </View>
+
+              {/* Action Buttons */}
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity
+                  onPress={() => handleSaveNotifSettings(true)}
+                  style={[styles.saveBtn, { flex: 1, backgroundColor: '#3b82f6' }]}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.saveBtnText}>💾 Применить ко всем</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleTestNotification}
+                  style={[styles.saveBtn, { flex: 1, backgroundColor: '#8b5cf6' }]}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.saveBtnText}>🔔 Тест сигнала</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             {/* Unified Backup & Sync Card (Web <-> Mobile) */}
             <View style={[styles.settingsCard, { backgroundColor: colors.card, borderColor: '#10b98150' }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -1504,7 +1688,7 @@ export default function App() {
                     О приложении и Разработчик
                   </Text>
                   <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                    Авто ТО v1.0.7 • 100% Offline-First
+                    Авто ТО v1.0.8 • 100% Offline-First
                   </Text>
                 </View>
               </View>

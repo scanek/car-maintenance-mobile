@@ -696,6 +696,7 @@ export function normalizeImportedBackup(payload) {
     version: "2.5",
     app: "car-maintenance-app",
     is_onboarded: payload.is_onboarded !== undefined ? payload.is_onboarded : true,
+    notification_settings: payload.notification_settings || { enabled: true, default_warn_km: 1000, default_warn_hours: 30 },
     theme: payload.theme || "dark",
     active_vehicle_id,
     vehicles,
@@ -719,7 +720,8 @@ export function createUnifiedBackup(db) {
     vehicles: vehicles,
     trackers: db.trackers || [],
     maintenance_records: db.maintenance_records || [],
-    reference_intervals: db.reference_intervals || []
+    reference_intervals: db.reference_intervals || [],
+    notification_settings: db.notification_settings || { enabled: true, default_warn_km: 1000, default_warn_hours: 30 }
   };
 }
 

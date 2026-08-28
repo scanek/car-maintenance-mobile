@@ -1,6 +1,6 @@
 {
   "name": "car-maintenance-mobile",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "author": "Александр Щеголев (@scanek)",
   "scripts": {
     "start": "expo start",
@@ -17,6 +17,7 @@
     "expo": "~51.0.0",
     "expo-document-picker": "~12.0.2",
     "expo-file-system": "~17.0.1",
+    "expo-notifications": "~0.28.19",
     "expo-sharing": "~12.0.1",
     "expo-status-bar": "~1.12.1",
     "react": "18.2.0",
