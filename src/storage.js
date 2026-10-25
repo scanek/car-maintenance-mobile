@@ -778,144 +778,535 @@ export async function resetDatabase(mode = 'clean') {
   }
 }
 
+// Smart matching helper for trackers imported without explicit 'match' field
+function deriveSmartTrackerMatch(name) {
+  if (!name || typeof name !== 'string') return '';
+  const lower = name.toLowerCase();
+  if (lower.includes('масл') && (lower.includes('мотор') || lower.includes('двиг') || lower.includes('двс') || (!lower.includes('коробк') && !lower.includes('кпп') && !lower.includes('трансмисс') && !lower.includes('вариатор') && !lower.includes('диффер') && !lower.includes('редуктор')))) {
+    return 'масло';
+  }
+  if (lower.includes('маслян') || (lower.includes('фильтр') && lower.includes('масл'))) {
+    return 'масляный';
+  }
+  if (lower.includes('воздушн')) return 'воздушный';
+  if (lower.includes('салон')) return 'салон';
+  if (lower.includes('свеч')) return 'свеч';
+  if (lower.includes('тормозн')) return 'тормозн';
+  if (lower.includes('антифриз') || lower.includes('охлажд')) return 'антифриз';
+  if (lower.includes('коробк') || lower.includes('кпп') || lower.includes('трансмисс') || lower.includes('вариатор')) return 'коробк';
+
+  const cleaned = lower.replace(/^(замена|смена|проверка|обслуживание|регулировка)\s+/i, '').trim();
+  return cleaned || lower;
+}
+
 // --- FULL SYNC & UNIFIED BACKUP NORMALIZER ---
 export function normalizeImportedBackup(payload) {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Пустой или некорректный файл бэкапа');
   }
 
-  let vehicles = [];
-  if (Array.isArray(payload.vehicles) && payload.vehicles.length > 0) {
-    vehicles = payload.vehicles.map(v => ({
-      id: v.id || 'car_1',
-      name: v.name || ((v.brand || '') + ' ' + (v.model || '')).trim() || 'Автомобиль',
-      brand: v.brand || '',
-      model: v.model || '',
-      plate: v.plate || '',
-      engine: v.engine || '',
-      year: v.year || null,
-      vin: v.vin || '',
-      purchase_date: v.purchase_date || new Date().toISOString().split('T')[0],
-      purchase_price: Number(v.purchase_price) || 0,
-      current_km: Number(v.current_km) || 0,
-      current_engine_hours: Number(v.current_engine_hours) || 0,
-      oil_spec: v.oil_spec || ''
-    }));
-  } else if (payload.vehicle && typeof payload.vehicle === 'object') {
-    const v = payload.vehicle;
-    vehicles = [{
-      id: v.id || 'car_1',
-      name: v.name || ((v.brand || '') + ' ' + (v.model || '')).trim() || 'Автомобиль',
-      brand: v.brand || '',
-      model: v.model || '',
-      plate: v.plate || '',
-      engine: v.engine || '',
-      year: v.year || null,
-      vin: v.vin || '',
-      purchase_date: v.purchase_date || new Date().toISOString().split('T')[0],
-      purchase_price: Number(v.purchase_price) || 0,
-      current_km: Number(v.current_km) || 0,
-      current_engine_hours: Number(v.current_engine_hours) || 0,
-      oil_spec: v.oil_spec || ''
-    }];
+  // 1. Определение типа бэкапа:
+  // - Полный гаражный бэкап AutoTracker (type: "user_garage_backup" или массив data с машинами)
+  // - Одиночный бэкап автомобиля AutoTracker (root vehicle + service_records/fuel_logs/documents...)
+  // - Родной формат car-maintenance-mobile / car-maintenance-app (массив vehicles)
+  const isAutoTrackerGarage = (payload.type === 'user_garage_backup' || Array.isArray(payload.data)) && Array.isArray(payload.data) && payload.data.length > 0;
+  const isAutoTrackerSingle = Boolean(
+    payload.vehicle && typeof payload.vehicle === 'object' &&
+    (payload.service_records || payload.fuel_logs || payload.documents || payload.app === 'Бортовой Журнал' || !Array.isArray(payload.vehicles))
+  );
+
+  let rawVehiclesData = [];
+  let isNativeFormat = false;
+
+  if (isAutoTrackerGarage) {
+    rawVehiclesData = payload.data;
+  } else if (isAutoTrackerSingle) {
+    rawVehiclesData = [payload];
+  } else if (Array.isArray(payload.vehicles) && payload.vehicles.length > 0) {
+    isNativeFormat = true;
   } else {
-    vehicles = DEFAULT_CLEAN_DB.vehicles;
+    throw new Error('В файле бэкапа не найдены данные автомобиля');
   }
 
-  const active_vehicle_id = payload.active_vehicle_id || (payload.vehicle && payload.vehicle.id) || vehicles[0].id;
+  const vehicles = [];
+  const allMaintenanceRecords = [];
+  const allFuelRecords = [];
+  const allOtherExpenses = [];
+  const allTyreSets = [];
+  const trackerMap = new Map();
 
-  const rawRecords = Array.isArray(payload.maintenance_records) ? payload.maintenance_records : [];
-  const maintenance_records = rawRecords.map((r, idx) => ({
-    id: r.id || (idx + 1),
-    vehicle_id: r.vehicle_id || active_vehicle_id,
-    to_tag: r.to_tag || 'ТО',
-    date: r.date || new Date().toISOString().split('T')[0],
-    mileage: Number(r.mileage) || 0,
-    engine_hours: Number(r.engine_hours) || 0,
-    category: r.category || 'Двигатель',
-    item_name: r.item_name || 'Деталь',
-    brand: r.brand || '',
-    article: r.article || '',
-    quantity: Number(r.quantity) || 1,
-    unit: r.unit || 'шт',
-    price_type: r.price_type || 'total',
-    price_per_unit: Number(r.price_per_unit) || Number(r.total_price) || 0,
-    total_price: Number(r.total_price) || Number(r.price_per_unit) || 0,
-    interval_km: Number(r.interval_km) || 7500,
-    interval_hours: Number(r.interval_hours) || 0,
-    next_km: Number(r.next_km) || (Number(r.mileage) || 0) + (Number(r.interval_km) || 7500),
-    next_hours: Number(r.next_hours) || 0,
-    note: r.note || '',
-    store: r.store || '',
-    url: r.url || ''
-  }));
+  let recordCounter = 1;
+  let fuelCounter = 1;
+  let expenseCounter = 1;
 
-  const rawTrackers = (Array.isArray(payload.trackers) && payload.trackers.length > 0) ? payload.trackers : DEFAULT_CLEAN_DB.trackers;
-  const trackers = rawTrackers.map((t, idx) => {
-    let icon = t.icon || '⚙️';
-    if (ICON_MAP[icon]) icon = ICON_MAP[icon];
-    return {
-      id: t.id || ('tr_' + (idx + 1)),
-      name: t.name || 'Регламент',
-      category: t.category || 'Двигатель',
-      match: t.match || (t.name || '').toLowerCase(),
-      interval_km: Number(t.interval_km) || 7500,
-      interval_hours: Number(t.interval_hours) || 0,
-      interval_months: Number(t.interval_months) || 12,
-      warn_km: Number(t.warn_km) || 1000,
-      warn_hours: Number(t.warn_hours) || 30,
-      warn_days: Number(t.warn_days) || 30,
-      spec: t.spec || '',
-      brand: t.brand || '',
-      article: t.article || '',
-      icon: icon,
-      enabled: t.enabled !== false
-    };
+  if (!isNativeFormat) {
+    rawVehiclesData.forEach((item, carIdx) => {
+      const v = item.vehicle || item;
+      const carId = String(v.id || ('car_' + (carIdx + 1)));
+
+      // Нормализация автомобиля
+      const brandName = (v.brand || v.make || '').trim();
+      const modelName = (v.model || '').trim();
+      const fallbackName = (brandName + ' ' + modelName).trim() || 'Автомобиль';
+
+      vehicles.push({
+        id: carId,
+        name: v.name || fallbackName,
+        brand: brandName,
+        model: modelName,
+        plate: v.plate || v.license_plate || '',
+        engine: v.engine || '',
+        year: v.year ? Number(v.year) : null,
+        vin: v.vin || '',
+        purchase_date: v.purchase_date ? String(v.purchase_date).split('T')[0] : new Date().toISOString().split('T')[0],
+        purchase_price: Number(v.purchase_price) || 0,
+        current_km: Number(v.current_km ?? v.current_odometer ?? v.starting_odometer ?? 0),
+        current_engine_hours: Number(v.current_engine_hours) || 0,
+        oil_spec: v.oil_spec || ''
+      });
+
+      // Нормализация записей ТО (AutoTracker: service_records; CarMaintenance: maintenance_records)
+      const rawServices = Array.isArray(item.service_records) 
+        ? item.service_records 
+        : (Array.isArray(item.maintenance_records) ? item.maintenance_records : []);
+
+      rawServices.forEach((s) => {
+        const sDate = s.date ? String(s.date).split('T')[0] : new Date().toISOString().split('T')[0];
+        const sMileage = Number(s.odometer ?? s.mileage ?? 0);
+        const sHours = Number(s.engine_hours) || 0;
+        const sTag = s.to_tag || s.title || 'ТО';
+        const sStore = s.store || '';
+        const sNote = s.description || s.notes || s.note || '';
+
+        if (Array.isArray(s.items) && s.items.length > 0) {
+          // Разворачиваем вложенные позиции деталей
+          s.items.forEach((it) => {
+            allMaintenanceRecords.push({
+              id: recordCounter++,
+              vehicle_id: carId,
+              to_tag: sTag,
+              date: sDate,
+              mileage: sMileage,
+              engine_hours: sHours,
+              category: it.category || 'Расходники',
+              item_name: it.name || 'Запчасть',
+              brand: it.brand || '',
+              article: it.part_number || it.article || '',
+              quantity: Number(it.quantity) || 1,
+              unit: it.unit || 'шт',
+              price_type: 'total',
+              price_per_unit: Number(it.unit_price) || Number(it.total_price) || 0,
+              total_price: Number(it.total_price) || Math.round((Number(it.quantity) || 1) * (Number(it.unit_price) || 0)),
+              interval_km: 7500,
+              interval_hours: 0,
+              next_km: sMileage + 7500,
+              next_hours: sHours > 0 ? sHours + 250 : 0,
+              note: sNote,
+              store: it.store || sStore
+            });
+          });
+
+          // Если были отдельно указаны работы сервиса
+          if (Number(s.cost_labor) > 0) {
+            allMaintenanceRecords.push({
+              id: recordCounter++,
+              vehicle_id: carId,
+              to_tag: sTag,
+              date: sDate,
+              mileage: sMileage,
+              engine_hours: sHours,
+              category: 'Сервис',
+              item_name: 'Работы / Услуги сервиса',
+              brand: '',
+              article: '',
+              quantity: 1,
+              unit: 'усл',
+              price_type: 'total',
+              price_per_unit: Number(s.cost_labor),
+              total_price: Number(s.cost_labor),
+              interval_km: 7500,
+              interval_hours: 0,
+              next_km: sMileage + 7500,
+              next_hours: 0,
+              note: sNote,
+              store: sStore
+            });
+          }
+        } else {
+          // Одиночная запись без разбивки по запчастям
+          allMaintenanceRecords.push({
+            id: recordCounter++,
+            vehicle_id: carId,
+            to_tag: sTag,
+            date: sDate,
+            mileage: sMileage,
+            engine_hours: sHours,
+            category: s.category || 'Обслуживание',
+            item_name: s.item_name || s.title || 'ТО / Ремонт',
+            brand: s.brand || '',
+            article: s.article || '',
+            quantity: Number(s.quantity) || 1,
+            unit: s.unit || 'шт',
+            price_type: 'total',
+            price_per_unit: Number(s.total_cost ?? s.total_price ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
+            total_price: Number(s.total_cost ?? s.total_price ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
+            interval_km: Number(s.interval_km) || 7500,
+            interval_hours: Number(s.interval_hours) || 0,
+            next_km: Number(s.next_km) || (sMileage + (Number(s.interval_km) || 7500)),
+            next_hours: 0,
+            note: sNote,
+            store: sStore
+          });
+        }
+      });
+
+      // Нормализация заправок (AutoTracker: fuel_logs; CarMaintenance: fuel_records)
+      const rawFuels = Array.isArray(item.fuel_logs) 
+        ? item.fuel_logs 
+        : (Array.isArray(item.fuel_records) ? item.fuel_records : []);
+
+      rawFuels.forEach((f) => {
+        const fLiters = Number(f.fuel_amount ?? f.liters ?? 0);
+        const fUnitPrice = Number(f.unit_price ?? f.price_per_liter ?? 0);
+        const fTotal = Number(f.total_cost ?? f.total_price ?? Math.round(fLiters * fUnitPrice));
+
+        allFuelRecords.push({
+          id: fuelCounter++,
+          vehicle_id: carId,
+          date: f.date ? String(f.date).split('T')[0] : new Date().toISOString().split('T')[0],
+          mileage: Number(f.odometer ?? f.mileage ?? 0),
+          liters: fLiters,
+          price_per_liter: fUnitPrice,
+          total_price: fTotal,
+          fuel_type: f.fuel_grade || f.fuel_type || 'АИ-95',
+          is_full_tank: f.is_full_tank !== false,
+          station: f.gas_station || f.station || '',
+          note: f.notes || f.note || ''
+        });
+      });
+
+      // Нормализация документов / прочих расходов (AutoTracker: documents; CarMaintenance: other_expenses)
+      const rawDocs = Array.isArray(item.documents) 
+        ? item.documents 
+        : (Array.isArray(item.other_expenses) ? item.other_expenses : []);
+
+      rawDocs.forEach((d) => {
+        let docTitle = d.title || d.document_number || 'Расход';
+        if (d.document_number && !docTitle.includes(d.document_number)) {
+          docTitle += ` (${d.document_number})`;
+        }
+
+        allOtherExpenses.push({
+          id: expenseCounter++,
+          vehicle_id: carId,
+          date: d.issue_date ? String(d.issue_date).split('T')[0] : (d.date ? String(d.date).split('T')[0] : new Date().toISOString().split('T')[0]),
+          mileage: Number(d.mileage) || 0,
+          category: d.doc_type === 'insurance' ? 'Страховка' : (d.category || 'Документы'),
+          title: docTitle,
+          total_price: Number(d.price ?? d.total_price ?? 0),
+          expiry_date: d.expiration_date ? String(d.expiration_date).split('T')[0] : (d.expiry_date ? String(d.expiry_date).split('T')[0] : ''),
+          note: d.notes || d.note || (d.company ? `Компания: ${d.company}` : '')
+        });
+      });
+
+      // Нормализация комплектов шин
+      const rawTyres = Array.isArray(item.tyre_sets) ? item.tyre_sets : [];
+      rawTyres.forEach((t, tIdx) => {
+        allTyreSets.push({
+          id: String(t.id || ('tyre_' + carId + '_' + (tIdx + 1))),
+          vehicle_id: carId,
+          season: t.season || 'summer',
+          type: t.type || (t.season === 'winter' ? 'stud' : 'road'),
+          name: t.name || (t.season === 'winter' ? 'Зимний комплект' : 'Летний комплект'),
+          brand_model: t.brand_model || '',
+          size: t.size || '225/55 R19',
+          current_km: Number(t.current_km) || 0,
+          tread_depth_mm: Number(t.tread_depth_mm) || 8.0,
+          is_active: Boolean(t.is_active),
+          install_date: t.install_date ? String(t.install_date).split('T')[0] : null,
+          install_mileage: Number(t.install_mileage) || 0
+        });
+      });
+
+      // Нормализация регламентов (trackers)
+      if (Array.isArray(item.trackers)) {
+        item.trackers.forEach((t) => {
+          if (!t || !t.name) return;
+          const key = (t.name || '').trim().toLowerCase();
+          if (!trackerMap.has(key)) {
+            let iconEmoji = t.icon || '⚙️';
+            if (ICON_MAP[iconEmoji]) iconEmoji = ICON_MAP[iconEmoji];
+
+            const smartMatch = deriveSmartTrackerMatch(t.name);
+            const matchTerm = t.match || smartMatch || (t.name || '').toLowerCase();
+
+            trackerMap.set(key, {
+              id: String(t.id || ('tr_' + (trackerMap.size + 1))),
+              name: t.name || 'Регламент',
+              category: t.category || 'Двигатель',
+              match: matchTerm,
+              interval_km: Number(t.interval_km ?? t.interval_distance ?? 7500),
+              interval_hours: Number(t.interval_hours) || 0,
+              interval_months: Number(t.interval_months) || 12,
+              warn_km: Number(t.warn_km ?? t.notify_before_distance ?? 1000),
+              warn_hours: Number(t.warn_hours ?? t.notify_before_hours ?? 30),
+              warn_days: Number(t.warn_days ?? t.notify_before_days ?? 30),
+              spec: t.spec || '',
+              brand: t.brand || '',
+              article: t.article || '',
+              icon: iconEmoji,
+              enabled: t.enabled !== false
+            });
+          }
+        });
+      }
+    });
+  } else {
+    // Родной формат (массив vehicles)
+    payload.vehicles.forEach((v, carIdx) => {
+      const brandName = (v.brand || v.make || '').trim();
+      const modelName = (v.model || '').trim();
+      const fallbackName = (brandName + ' ' + modelName).trim() || 'Автомобиль';
+      vehicles.push({
+        id: String(v.id || ('car_' + (carIdx + 1))),
+        name: v.name || fallbackName,
+        brand: brandName,
+        model: modelName,
+        plate: v.plate || v.license_plate || '',
+        engine: v.engine || '',
+        year: v.year ? Number(v.year) : null,
+        vin: v.vin || '',
+        purchase_date: v.purchase_date ? String(v.purchase_date).split('T')[0] : new Date().toISOString().split('T')[0],
+        purchase_price: Number(v.purchase_price) || 0,
+        current_km: Number(v.current_km ?? v.current_odometer ?? v.starting_odometer ?? 0),
+        current_engine_hours: Number(v.current_engine_hours) || 0,
+        oil_spec: v.oil_spec || ''
+      });
+    });
+
+    const defaultCarId = vehicles[0]?.id || 'car_1';
+
+    const rawServices = Array.isArray(payload.maintenance_records) 
+      ? payload.maintenance_records 
+      : (Array.isArray(payload.service_records) ? payload.service_records : []);
+
+    rawServices.forEach((s) => {
+      const sCarId = String(s.vehicle_id || defaultCarId);
+      const sDate = s.date ? String(s.date).split('T')[0] : new Date().toISOString().split('T')[0];
+      const sMileage = Number(s.odometer ?? s.mileage ?? 0);
+      const sHours = Number(s.engine_hours) || 0;
+      const sTag = s.to_tag || s.title || 'ТО';
+      const sStore = s.store || '';
+      const sNote = s.description || s.notes || s.note || '';
+
+      if (Array.isArray(s.items) && s.items.length > 0) {
+        s.items.forEach((it) => {
+          allMaintenanceRecords.push({
+            id: recordCounter++,
+            vehicle_id: sCarId,
+            to_tag: sTag,
+            date: sDate,
+            mileage: sMileage,
+            engine_hours: sHours,
+            category: it.category || 'Расходники',
+            item_name: it.name || 'Запчасть',
+            brand: it.brand || '',
+            article: it.part_number || it.article || '',
+            quantity: Number(it.quantity) || 1,
+            unit: it.unit || 'шт',
+            price_type: 'total',
+            price_per_unit: Number(it.unit_price) || Number(it.total_price) || 0,
+            total_price: Number(it.total_price) || Math.round((Number(it.quantity) || 1) * (Number(it.unit_price) || 0)),
+            interval_km: 7500,
+            interval_hours: 0,
+            next_km: sMileage + 7500,
+            next_hours: sHours > 0 ? sHours + 250 : 0,
+            note: sNote,
+            store: it.store || sStore
+          });
+        });
+
+        if (Number(s.cost_labor) > 0) {
+          allMaintenanceRecords.push({
+            id: recordCounter++,
+            vehicle_id: sCarId,
+            to_tag: sTag,
+            date: sDate,
+            mileage: sMileage,
+            engine_hours: sHours,
+            category: 'Сервис',
+            item_name: 'Работы / Услуги сервиса',
+            brand: '',
+            article: '',
+            quantity: 1,
+            unit: 'усл',
+            price_type: 'total',
+            price_per_unit: Number(s.cost_labor),
+            total_price: Number(s.cost_labor),
+            interval_km: 7500,
+            interval_hours: 0,
+            next_km: sMileage + 7500,
+            next_hours: 0,
+            note: sNote,
+            store: sStore
+          });
+        }
+      } else {
+        allMaintenanceRecords.push({
+          id: recordCounter++,
+          vehicle_id: sCarId,
+          to_tag: sTag,
+          date: sDate,
+          mileage: sMileage,
+          engine_hours: sHours,
+          category: s.category || 'Обслуживание',
+          item_name: s.item_name || s.title || 'ТО / Ремонт',
+          brand: s.brand || '',
+          article: s.article || '',
+          quantity: Number(s.quantity) || 1,
+          unit: s.unit || 'шт',
+          price_type: s.price_type || 'total',
+          price_per_unit: Number(s.price_per_unit ?? s.total_cost ?? s.total_price ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
+          total_price: Number(s.total_price ?? s.total_cost ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
+          interval_km: Number(s.interval_km) || 7500,
+          interval_hours: Number(s.interval_hours) || 0,
+          next_km: Number(s.next_km) || (sMileage + (Number(s.interval_km) || 7500)),
+          next_hours: Number(s.next_hours) || 0,
+          note: sNote,
+          store: sStore,
+          url: s.url || ''
+        });
+      }
+    });
+
+    const rawFuels = Array.isArray(payload.fuel_records) 
+      ? payload.fuel_records 
+      : (Array.isArray(payload.fuel_logs) ? payload.fuel_logs : []);
+
+    rawFuels.forEach((f) => {
+      const fCarId = String(f.vehicle_id || defaultCarId);
+      const fLiters = Number(f.liters ?? f.fuel_amount ?? 0);
+      const fUnitPrice = Number(f.price_per_liter ?? f.unit_price ?? 0);
+      const fTotal = Number(f.total_price ?? f.total_cost ?? Math.round(fLiters * fUnitPrice));
+
+      allFuelRecords.push({
+        id: fuelCounter++,
+        vehicle_id: fCarId,
+        date: f.date ? String(f.date).split('T')[0] : new Date().toISOString().split('T')[0],
+        mileage: Number(f.mileage ?? f.odometer ?? 0),
+        liters: fLiters,
+        price_per_liter: fUnitPrice,
+        total_price: fTotal,
+        fuel_type: f.fuel_type || f.fuel_grade || 'АИ-95',
+        is_full_tank: f.is_full_tank !== false,
+        station: f.station || f.gas_station || '',
+        note: f.note || f.notes || ''
+      });
+    });
+
+    const rawExpenses = Array.isArray(payload.other_expenses) 
+      ? payload.other_expenses 
+      : (Array.isArray(payload.documents) ? payload.documents : []);
+
+    rawExpenses.forEach((e) => {
+      const eCarId = String(e.vehicle_id || defaultCarId);
+      let docTitle = e.title || e.document_number || 'Расход';
+      if (e.document_number && !docTitle.includes(e.document_number)) {
+        docTitle += ` (${e.document_number})`;
+      }
+
+      allOtherExpenses.push({
+        id: expenseCounter++,
+        vehicle_id: eCarId,
+        date: e.date ? String(e.date).split('T')[0] : (e.issue_date ? String(e.issue_date).split('T')[0] : new Date().toISOString().split('T')[0]),
+        mileage: Number(e.mileage) || 0,
+        category: e.doc_type === 'insurance' ? 'Страховка' : (e.category || 'Прочее'),
+        title: docTitle,
+        total_price: Number(e.total_price ?? e.price ?? 0),
+        expiry_date: e.expiry_date ? String(e.expiry_date).split('T')[0] : (e.expiration_date ? String(e.expiration_date).split('T')[0] : ''),
+        note: e.note || e.notes || (e.company ? `Компания: ${e.company}` : '')
+      });
+    });
+
+    const rawTyres = Array.isArray(payload.tyre_sets) ? payload.tyre_sets : [];
+    rawTyres.forEach((t, tIdx) => {
+      const tCarId = String(t.vehicle_id || defaultCarId);
+      allTyreSets.push({
+        id: String(t.id || ('tyre_' + tCarId + '_' + (tIdx + 1))),
+        vehicle_id: tCarId,
+        season: t.season || 'summer',
+        type: t.type || (t.season === 'winter' ? 'stud' : 'road'),
+        name: t.name || (t.season === 'winter' ? 'Зимний комплект' : 'Летний комплект'),
+        brand_model: t.brand_model || '',
+        size: t.size || '225/55 R19',
+        current_km: Number(t.current_km) || 0,
+        tread_depth_mm: Number(t.tread_depth_mm) || 8.0,
+        is_active: Boolean(t.is_active),
+        install_date: t.install_date ? String(t.install_date).split('T')[0] : null,
+        install_mileage: Number(t.install_mileage) || 0
+      });
+    });
+
+    if (Array.isArray(payload.trackers)) {
+      payload.trackers.forEach((t) => {
+        if (!t || !t.name) return;
+        const key = (t.name || '').trim().toLowerCase();
+        if (!trackerMap.has(key)) {
+          let iconEmoji = t.icon || '⚙️';
+          if (ICON_MAP[iconEmoji]) iconEmoji = ICON_MAP[iconEmoji];
+
+          const smartMatch = deriveSmartTrackerMatch(t.name);
+          const matchTerm = t.match || smartMatch || (t.name || '').toLowerCase();
+
+          trackerMap.set(key, {
+            id: String(t.id || ('tr_' + (trackerMap.size + 1))),
+            name: t.name || 'Регламент',
+            category: t.category || 'Двигатель',
+            match: matchTerm,
+            interval_km: Number(t.interval_km ?? t.interval_distance ?? 7500),
+            interval_hours: Number(t.interval_hours) || 0,
+            interval_months: Number(t.interval_months) || 12,
+            warn_km: Number(t.warn_km ?? t.notify_before_distance ?? 1000),
+            warn_hours: Number(t.warn_hours ?? t.notify_before_hours ?? 30),
+            warn_days: Number(t.warn_days ?? t.notify_before_days ?? 30),
+            spec: t.spec || '',
+            brand: t.brand || '',
+            article: t.article || '',
+            icon: iconEmoji,
+            enabled: t.enabled !== false
+          });
+        }
+      });
+    }
+  }
+
+  let mergedTrackers = Array.from(trackerMap.values());
+  if (mergedTrackers.length === 0) {
+    mergedTrackers = DEFAULT_CLEAN_DB.trackers;
+  }
+
+  // Гарантируем наличие хотя бы одного комплекта шин для каждого автомобиля
+  vehicles.forEach((veh) => {
+    const hasTyre = allTyreSets.some(t => String(t.vehicle_id) === String(veh.id));
+    if (!hasTyre) {
+      allTyreSets.push({
+        id: 'tyre_summer_' + veh.id,
+        vehicle_id: veh.id,
+        season: 'summer',
+        type: 'road',
+        name: 'Летний комплект',
+        brand_model: '',
+        size: '225/55 R19',
+        current_km: 0,
+        tread_depth_mm: 8.0,
+        is_active: true,
+        install_date: new Date().toISOString().split('T')[0],
+        install_mileage: 0
+      });
+    }
   });
 
-  const rawFuel = Array.isArray(payload.fuel_records) ? payload.fuel_records : [];
-  const fuel_records = rawFuel.map((f, idx) => ({
-    id: f.id || (idx + 1),
-    vehicle_id: f.vehicle_id || active_vehicle_id,
-    date: f.date || new Date().toISOString().split('T')[0],
-    mileage: Number(f.mileage) || 0,
-    liters: Number(f.liters) || 0,
-    price_per_liter: Number(f.price_per_liter) || 0,
-    total_price: Number(f.total_price) || Math.round((Number(f.liters) || 0) * (Number(f.price_per_liter) || 0)),
-    fuel_type: f.fuel_type || 'АИ-95',
-    is_full_tank: f.is_full_tank !== false,
-    station: f.station || '',
-    note: f.note || ''
-  }));
-
-  const rawExpenses = Array.isArray(payload.other_expenses) ? payload.other_expenses : [];
-  const other_expenses = rawExpenses.map((e, idx) => ({
-    id: e.id || (idx + 1),
-    vehicle_id: e.vehicle_id || active_vehicle_id,
-    date: e.date || new Date().toISOString().split('T')[0],
-    mileage: Number(e.mileage) || 0,
-    category: e.category || 'Прочее',
-    title: e.title || 'Расход',
-    total_price: Number(e.total_price) || 0,
-    expiry_date: e.expiry_date || '',
-    note: e.note || ''
-  }));
-
-  const rawTyres = Array.isArray(payload.tyre_sets) && payload.tyre_sets.length > 0 ? payload.tyre_sets : DEFAULT_CLEAN_DB.tyre_sets;
-  const tyre_sets = rawTyres.map((t, idx) => ({
-    id: t.id || ('tyre_' + (idx + 1)),
-    vehicle_id: t.vehicle_id || active_vehicle_id,
-    season: t.season || 'summer',
-    type: t.type || (t.season === 'winter' ? 'stud' : 'road'),
-    name: t.name || (t.season === 'winter' ? 'Зимний комплект' : 'Летний комплект'),
-    brand_model: t.brand_model || '',
-    size: t.size || '225/55 R19',
-    current_km: Number(t.current_km) || 0,
-    tread_depth_mm: Number(t.tread_depth_mm) || 8.0,
-    is_active: Boolean(t.is_active),
-    install_date: t.install_date || null,
-    install_mileage: Number(t.install_mileage) || 0
-  }));
+  const active_vehicle_id = String(payload.active_vehicle_id || (payload.vehicle && payload.vehicle.id) || vehicles[0]?.id || 'car_1');
 
   return {
     version: "2.6",
@@ -930,11 +1321,11 @@ export function normalizeImportedBackup(payload) {
     },
     active_vehicle_id,
     vehicles,
-    trackers,
-    maintenance_records,
-    fuel_records,
-    other_expenses,
-    tyre_sets,
+    trackers: mergedTrackers,
+    maintenance_records: allMaintenanceRecords,
+    fuel_records: allFuelRecords,
+    other_expenses: allOtherExpenses,
+    tyre_sets: allTyreSets,
     reference_intervals: Array.isArray(payload.reference_intervals) ? payload.reference_intervals : []
   };
 }
@@ -1027,7 +1418,7 @@ export async function pickAndImportBackupFile() {
 
 export function getActiveVehicle(db) {
   if (!db || !db.vehicles || db.vehicles.length === 0) return null;
-  const found = db.vehicles.find(v => v.id === db.active_vehicle_id);
+  const found = db.vehicles.find(v => String(v.id) === String(db.active_vehicle_id));
   return found || db.vehicles[0];
 }
 
