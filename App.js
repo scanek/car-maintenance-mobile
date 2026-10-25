@@ -51,7 +51,8 @@ import {
   exportBackupFile,
   pickAndImportBackupFile,
   normalizeImportedBackup,
-  switchActiveTyreSet
+  switchActiveTyreSet,
+  parseEngineHours
 } from './src/storage';
 import { exportToExcel } from './src/excelExport';
 import { requestNotificationPermissions, sendTestNotification, checkAndNotifyUpcomingTO } from './src/notifications';
@@ -92,6 +93,8 @@ export default function App() {
   // TO Modal
   const [toModalVisible, setToModalVisible] = useState(false);
   const [editingToTag, setEditingToTag] = useState('');
+  const [editingGroupId, setEditingGroupId] = useState(null);
+  const [editingPartIds, setEditingPartIds] = useState([]);
   const [toTag, setToTag] = useState('');
   const [toDate, setToDate] = useState('');
   const [toKm, setToKm] = useState('');
@@ -360,12 +363,12 @@ export default function App() {
   const activeVehicle = getActiveVehicle(db);
   const statusData = calculateDashboardStatus(db);
   const toGroups = getTOGroups(db);
-  const vId = activeVehicle?.id || 'car_1';
+  const vId = String(activeVehicle?.id || 'car_1');
 
   // --- MILEAGE MODAL HANDLERS ---
   const openMileageModal = () => {
     setInputKm(String(activeVehicle?.current_km || '0'));
-    setInputHours(String(activeVehicle?.current_engine_hours || '0'));
+    setInputHours(String(parseEngineHours(activeVehicle?.current_engine_hours)));
     setMileageHint(null);
     setMileageModalVisible(true);
   };
@@ -374,7 +377,7 @@ export default function App() {
     setInputKm(val);
     const num = Number(val);
     if (!isNaN(num) && num > 0) {
-      const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === vId);
+      const records = (db.maintenance_records || []).filter(r => String(r.vehicle_id || 'car_1') === vId);
       const maxKm = records.reduce((m, r) => Math.max(m, Number(r.mileage) || 0), 0);
       if (maxKm > 0 && num < maxKm) {
         setMileageHint({ num, lastKm: maxKm, combined: maxKm + num });
@@ -388,14 +391,14 @@ export default function App() {
 
   const saveMileage = () => {
     const km = Number(inputKm);
-    const hours = Number(inputHours);
+    const hours = parseEngineHours(inputHours);
     if (isNaN(km) || km < 0) {
       Alert.alert('Ошибка', 'Введите корректное число километров');
       return;
     }
     const updatedVehicles = (db.vehicles || []).map(v => {
-      if (v.id === vId) {
-        return { ...v, current_km: km, current_engine_hours: isNaN(hours) ? v.current_engine_hours : hours };
+      if (String(v.id) === vId) {
+        return { ...v, current_km: km, current_engine_hours: hours };
       }
       return v;
     });
@@ -506,7 +509,7 @@ export default function App() {
     let updatedFuel = [];
 
     if (editingFuelId) {
-      updatedFuel = fuelRecords.map(f => f.id === editingFuelId ? {
+      updatedFuel = fuelRecords.map(f => String(f.id) === String(editingFuelId) ? {
         ...f,
         date: fuelDate,
         mileage: km,
@@ -519,7 +522,7 @@ export default function App() {
         note: fuelNote.trim()
       } : f);
     } else {
-      const newId = (fuelRecords.length > 0 ? Math.max(...fuelRecords.map(f => f.id)) : 0) + 1;
+      const newId = (fuelRecords.length > 0 ? Math.max(...fuelRecords.map(f => Number(f.id) || 0)) : 0) + 1;
       updatedFuel = [
         ...fuelRecords,
         {
@@ -541,7 +544,7 @@ export default function App() {
     // Auto-update car mileage if higher
     let updatedVehicles = db.vehicles || [];
     if (km > (activeVehicle?.current_km || 0)) {
-      updatedVehicles = updatedVehicles.map(v => v.id === vId ? { ...v, current_km: km } : v);
+      updatedVehicles = updatedVehicles.map(v => String(v.id) === vId ? { ...v, current_km: km } : v);
     }
 
     const newDb = { ...db, fuel_records: updatedFuel, vehicles: updatedVehicles };
@@ -557,7 +560,7 @@ export default function App() {
         text: 'Удалить',
         style: 'destructive',
         onPress: () => {
-          const nextFuel = (db.fuel_records || []).filter(f => f.id !== id);
+          const nextFuel = (db.fuel_records || []).filter(f => String(f.id) !== String(id));
           updateDb({ ...db, fuel_records: nextFuel });
         }
       }
@@ -604,7 +607,7 @@ export default function App() {
     const km = Number(expKm) || activeVehicle?.current_km || 0;
 
     if (editingExpenseId) {
-      updatedExpenses = expenses.map(e => e.id === editingExpenseId ? {
+      updatedExpenses = expenses.map(e => String(e.id) === String(editingExpenseId) ? {
         ...e,
         date: expDate,
         mileage: km,
@@ -615,7 +618,7 @@ export default function App() {
         note: expNote.trim()
       } : e);
     } else {
-      const newId = (expenses.length > 0 ? Math.max(...expenses.map(e => e.id)) : 0) + 1;
+      const newId = (expenses.length > 0 ? Math.max(...expenses.map(e => Number(e.id) || 0)) : 0) + 1;
       updatedExpenses = [
         ...expenses,
         {
@@ -646,7 +649,7 @@ export default function App() {
         text: 'Удалить',
         style: 'destructive',
         onPress: () => {
-          const nextExp = (db.other_expenses || []).filter(e => e.id !== id);
+          const nextExp = (db.other_expenses || []).filter(e => String(e.id) !== String(id));
           updateDb({ ...db, other_expenses: nextExp });
         }
       }
@@ -694,7 +697,7 @@ export default function App() {
     let updatedTyres = [];
 
     if (editingTyreId) {
-      updatedTyres = tyres.map(t => t.id === editingTyreId ? {
+      updatedTyres = tyres.map(t => String(t.id) === String(editingTyreId) ? {
         ...t,
         name: tyreName.trim(),
         season: tyreSeason,
@@ -733,51 +736,57 @@ export default function App() {
   // --- TO GROUP MODAL HANDLERS ---
   const openAddTOModal = () => {
     setEditingToTag('');
+    setEditingGroupId(null);
+    setEditingPartIds([]);
     const nextNum = toGroups.length + 1;
     setToTag('ТО-' + nextNum);
     setToDate(new Date().toISOString().split('T')[0]);
     setToKm(String(activeVehicle?.current_km || ''));
-    setToHours(String(activeVehicle?.current_engine_hours || ''));
+    setToHours(String(parseEngineHours(activeVehicle?.current_engine_hours)));
     
-    // Autofill default parts from enabled trackers
-    const defaultParts = (db.trackers || []).filter(t => t.enabled !== false).map((t, idx) => ({
-      temp_id: 'part_' + (idx + 1),
-      item_name: t.name,
-      category: t.category,
-      brand: t.brand || '',
-      article: t.article || '',
-      quantity: 1,
-      unit: 'шт',
-      total_price: '',
-      interval_km: t.interval_km || 7500,
-      interval_hours: t.interval_hours || 0,
-      store: 'Ozon',
-      note: ''
-    }));
+    // Initial part
+    const firstTracker = (db.trackers || []).find(t => t.enabled !== false);
+    setToParts([
+      {
+        temp_id: 'part_1',
+        item_name: firstTracker ? firstTracker.name : 'Масло моторное',
+        category: firstTracker ? firstTracker.category : 'Двигатель',
+        brand: firstTracker?.brand || '',
+        article: firstTracker?.article || '',
+        quantity: 1,
+        unit: 'шт',
+        total_price: '',
+        interval_km: firstTracker?.interval_km || 7500,
+        interval_hours: parseEngineHours(firstTracker?.interval_hours),
+        store: '',
+        note: ''
+      }
+    ]);
 
-    setToParts(defaultParts);
     setToModalVisible(true);
   };
 
   const openEditTOModal = (group) => {
     setEditingToTag(group.to_tag);
+    setEditingGroupId(group.group_id);
+    setEditingPartIds((group.parts || []).map(p => p.id));
     setToTag(group.to_tag);
     setToDate(group.date || '');
     setToKm(String(group.mileage || ''));
-    setToHours(String(group.engine_hours || ''));
+    setToHours(String(parseEngineHours(group.engine_hours)));
     
     const parts = (group.parts || []).map(p => ({
       id: p.id,
       temp_id: 'part_' + p.id,
-      item_name: p.item_name,
-      category: p.category,
+      item_name: p.item_name || 'Деталь',
+      category: p.category || 'Двигатель',
       brand: p.brand || '',
       article: p.article || '',
       quantity: p.quantity || 1,
       unit: p.unit || 'шт',
       total_price: String(p.total_price || p.price_per_unit || ''),
       interval_km: p.interval_km || 7500,
-      interval_hours: p.interval_hours || 0,
+      interval_hours: parseEngineHours(p.interval_hours),
       store: p.store || '',
       note: p.note || ''
     }));
@@ -788,7 +797,7 @@ export default function App() {
 
   const saveTOEvent = () => {
     const km = Number(toKm);
-    const hours = Number(toHours) || 0;
+    const hours = parseEngineHours(toHours);
     const tag = toTag.trim();
 
     if (!tag) {
@@ -799,34 +808,43 @@ export default function App() {
       Alert.alert('Ошибка', 'Введите корректный пробег ТО');
       return;
     }
-    if (toParts.length === 0) {
+    const validParts = toParts.filter(p => (p.item_name || '').trim().length > 0);
+    if (validParts.length === 0) {
       Alert.alert('Ошибка', 'Добавьте хотя бы одну деталь или работу в ТО');
       return;
     }
 
     const allRecords = db.maintenance_records || [];
-    let recordsWithoutGroup = editingToTag
-      ? allRecords.filter(r => !( (r.vehicle_id || 'car_1') === vId && r.to_tag === editingToTag ))
-      : [...allRecords];
+    let recordsWithoutGroup;
+    if (editingPartIds && editingPartIds.length > 0) {
+      const removeIds = new Set(editingPartIds.map(id => String(id)));
+      recordsWithoutGroup = allRecords.filter(r => !removeIds.has(String(r.id)));
+    } else if (editingToTag) {
+      recordsWithoutGroup = allRecords.filter(r => !(String(r.vehicle_id || 'car_1') === vId && r.to_tag === editingToTag));
+    } else {
+      recordsWithoutGroup = [...allRecords];
+    }
 
-    let maxId = recordsWithoutGroup.reduce((m, r) => Math.max(m, r.id || 0), 0);
+    let maxId = recordsWithoutGroup.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+    const groupId = editingGroupId || ('to_' + vId + '_' + Date.now());
 
-    const newRecords = toParts.map(p => {
+    const newRecords = validParts.map(p => {
       maxId++;
       const price = Number(p.total_price) || 0;
       const intKm = Number(p.interval_km) || 7500;
-      const intH = Number(p.interval_hours) || 0;
+      const intH = parseEngineHours(p.interval_hours);
       return {
         id: p.id || maxId,
         vehicle_id: vId,
+        group_id: groupId,
         to_tag: tag,
         date: toDate,
         mileage: km,
         engine_hours: hours,
         category: p.category || 'Двигатель',
-        item_name: p.item_name || 'Деталь',
-        brand: p.brand || '',
-        article: p.article || '',
+        item_name: p.item_name.trim(),
+        brand: (p.brand || '').trim(),
+        article: (p.article || '').trim(),
         quantity: Number(p.quantity) || 1,
         unit: p.unit || 'шт',
         price_type: 'total',
@@ -846,7 +864,7 @@ export default function App() {
     // Update vehicle mileage if higher
     let updatedVehicles = db.vehicles || [];
     if (km > (activeVehicle?.current_km || 0)) {
-      updatedVehicles = updatedVehicles.map(v => v.id === vId ? {
+      updatedVehicles = updatedVehicles.map(v => String(v.id) === vId ? {
         ...v,
         current_km: km,
         current_engine_hours: hours > (v.current_engine_hours || 0) ? hours : v.current_engine_hours
@@ -860,15 +878,25 @@ export default function App() {
     Alert.alert('Успешно', 'Запись ТО "' + tag + '" (' + newRecords.length + ' поз.) сохранена!');
   };
 
-  const deleteTOEvent = (tag) => {
-    Alert.alert('Удаление ТО', 'Удалить все позиции события "' + tag + '"?', [
+  const deleteTOEvent = (tagOrGroup = null) => {
+    const targetTag = typeof tagOrGroup === 'string' ? tagOrGroup : toTag;
+    Alert.alert('Удаление ТО', 'Удалить все позиции события "' + targetTag + '"?', [
       { text: 'Отмена', style: 'cancel' },
       {
         text: 'Удалить',
         style: 'destructive',
         onPress: () => {
-          const nextRecords = (db.maintenance_records || []).filter(r => !( (r.vehicle_id || 'car_1') === vId && r.to_tag === tag ));
-          updateDb({ ...db, maintenance_records: nextRecords });
+          let updatedRecords;
+          if (editingPartIds && editingPartIds.length > 0) {
+            const removeIds = new Set(editingPartIds.map(id => String(id)));
+            updatedRecords = (db.maintenance_records || []).filter(r => !removeIds.has(String(r.id)));
+          } else {
+            updatedRecords = (db.maintenance_records || []).filter(r => !(String(r.vehicle_id || 'car_1') === vId && r.to_tag === targetTag));
+          }
+          const newDb = { ...db, maintenance_records: updatedRecords };
+          updateDb(newDb);
+          setToModalVisible(false);
+          Alert.alert('Успешно', 'Запись ТО удалена');
         }
       }
     ]);
@@ -916,7 +944,7 @@ export default function App() {
     let updatedVehicles = [];
 
     if (editCarId) {
-      updatedVehicles = vehicles.map(v => v.id === editCarId ? {
+      updatedVehicles = vehicles.map(v => String(v.id) === String(editCarId) ? {
         ...v,
         name: fullName,
         brand: brandName,
@@ -963,10 +991,10 @@ export default function App() {
       setTrCategory(tracker.category || 'Двигатель');
       setTrMatch(tracker.match || '');
       setTrKm(String(tracker.interval_km || '7500'));
-      setTrHours(String(tracker.interval_hours || '250'));
+      setTrHours(String(tracker.interval_hours !== undefined ? parseEngineHours(tracker.interval_hours) : '250'));
       setTrMonths(String(tracker.interval_months || '12'));
       setTrWarnKm(String(tracker.warn_km || '1000'));
-      setTrWarnHours(String(tracker.warn_hours || '30'));
+      setTrWarnHours(String(tracker.warn_hours !== undefined ? parseEngineHours(tracker.warn_hours) : '30'));
       setTrWarnDays(String(tracker.warn_days || '30'));
       setTrSpec(tracker.spec || '');
       setTrBrand(tracker.brand || '');
@@ -1005,10 +1033,10 @@ export default function App() {
       category: trCategory,
       match: trMatch.trim() || trName.trim().toLowerCase(),
       interval_km: Number(trKm) || 7500,
-      interval_hours: Number(trHours) || 0,
+      interval_hours: parseEngineHours(trHours),
       interval_months: Number(trMonths) || 12,
       warn_km: Number(trWarnKm) || 1000,
-      warn_hours: Number(trWarnHours) || 30,
+      warn_hours: parseEngineHours(trWarnHours) || 30,
       warn_days: Number(trWarnDays) || 30,
       spec: trSpec.trim(),
       brand: trBrand.trim(),
@@ -1018,7 +1046,7 @@ export default function App() {
     };
 
     if (editingTrackerId) {
-      updatedTrackers = trackers.map(t => t.id === editingTrackerId ? tData : t);
+      updatedTrackers = trackers.map(t => String(t.id) === String(editingTrackerId) ? tData : t);
     } else {
       updatedTrackers = [...trackers, tData];
     }
@@ -1027,6 +1055,7 @@ export default function App() {
     updateDb(newDb);
     setTrackerModalVisible(false);
     checkAndNotifyUpcomingTO(newDb);
+    Alert.alert('Успешно', 'Регламент "' + tData.name + '" сохранен!');
   };
 
   const deleteTracker = (id) => {
@@ -1036,8 +1065,9 @@ export default function App() {
         text: 'Удалить',
         style: 'destructive',
         onPress: () => {
-          const nextT = (db.trackers || []).filter(t => t.id !== id);
+          const nextT = (db.trackers || []).filter(t => String(t.id) !== String(id));
           updateDb({ ...db, trackers: nextT });
+          Alert.alert('Удалено', 'Регламент удален');
         }
       }
     ]);
@@ -1048,7 +1078,7 @@ export default function App() {
   toGroups.forEach(g => {
     allTimelineItems.push({
       type: 'to',
-      id: 'to_' + g.to_tag,
+      id: 'to_' + (g.group_id || g.to_tag),
       date: g.date || '—',
       mileage: Number(g.mileage) || 0,
       title: g.to_tag,
@@ -1060,7 +1090,7 @@ export default function App() {
     });
   });
 
-  (db.fuel_records || []).filter(f => (f.vehicle_id || 'car_1') === vId).forEach(f => {
+  (db.fuel_records || []).filter(f => String(f.vehicle_id || 'car_1') === vId).forEach(f => {
     allTimelineItems.push({
       type: 'fuel',
       id: 'fuel_' + f.id,
@@ -1075,7 +1105,7 @@ export default function App() {
     });
   });
 
-  (db.other_expenses || []).filter(e => (e.vehicle_id || 'car_1') === vId).forEach(e => {
+  (db.other_expenses || []).filter(e => String(e.vehicle_id || 'car_1') === vId).forEach(e => {
     allTimelineItems.push({
       type: 'expense',
       id: 'exp_' + e.id,
@@ -1104,7 +1134,7 @@ export default function App() {
   });
 
   // Filtered Parts for Tab 3
-  const allParts = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === vId);
+  const allParts = (db.maintenance_records || []).filter(r => String(r.vehicle_id || 'car_1') === vId);
   const filteredParts = allParts.filter(p => {
     const matchCat = !categoryFilter || categoryFilter === 'Все' || p.category === categoryFilter;
     const matchSearch = !searchTerm ||
@@ -1327,8 +1357,14 @@ export default function App() {
 
                 {statusData.consumables.map(c => {
                   const barColor = c.status_code === 'danger' ? '#ef4444' : (c.status_code === 'warning' ? '#f59e0b' : '#10b981');
+                  const tr = (db.trackers || []).find(t => String(t.id) === String(c.id) || t.name === c.name);
                   return (
-                    <View key={c.id} style={[styles.consumableCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+                    <TouchableOpacity
+                      key={c.id}
+                      onPress={() => openTrackerModal(tr || c)}
+                      activeOpacity={0.7}
+                      style={[styles.consumableCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+                    >
                       <View style={styles.consumableHeader}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                           <Text style={{ fontSize: 20 }}>{c.icon}</Text>
@@ -1336,13 +1372,21 @@ export default function App() {
                             <Text style={[styles.consumableName, { color: colors.text }]} numberOfLines={1}>{c.name}</Text>
                             <Text style={{ fontSize: 10, color: colors.textMuted }}>
                               {c.category} • Интервал: {Number(c.interval_km).toLocaleString('ru-RU')} км
-                              {c.interval_hours > 0 ? (' / ' + c.interval_hours + ' м/ч') : ''}
+                              {c.interval_hours > 0 ? (' / ' + Math.round(c.interval_hours) + ' м/ч') : ''}
                               {c.interval_months > 0 ? (' / ' + c.interval_months + ' мес') : ''}
                             </Text>
                           </View>
                         </View>
-                        <View style={[styles.statusBadge, { backgroundColor: barColor + '20', borderColor: barColor }]}>
-                          <Text style={{ fontSize: 10, fontWeight: 'bold', color: barColor }}>{c.status_text}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={[styles.statusBadge, { backgroundColor: barColor + '20', borderColor: barColor }]}>
+                            <Text style={{ fontSize: 10, fontWeight: 'bold', color: barColor }}>{c.status_text}</Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => openTrackerModal(tr || c)}
+                            style={{ padding: 4 }}
+                          >
+                            <Text style={{ fontSize: 14, color: '#3b82f6', fontWeight: 'bold' }}>✎</Text>
+                          </TouchableOpacity>
                         </View>
                       </View>
 
@@ -1355,7 +1399,7 @@ export default function App() {
                       <View style={styles.consumableFooterRow}>
                         <Text style={{ fontSize: 11, fontWeight: 'bold', color: colors.text }}>
                           Остаток: {Number(c.rem_km).toLocaleString('ru-RU')} км
-                          {c.rem_hours !== null ? (' • ' + c.rem_hours + ' м/ч') : ''}
+                          {c.rem_hours !== null ? (' • ' + Math.round(c.rem_hours) + ' м/ч') : ''}
                           {c.rem_days !== undefined ? (' • ' + c.rem_days + ' дн.') : ''}
                         </Text>
                         <Text style={{ fontSize: 10, color: colors.textMuted }}>
@@ -1368,7 +1412,7 @@ export default function App() {
                           📌 Рекомендуется: {[c.brand, c.article].filter(Boolean).join(' • ')}
                         </Text>
                       ) : null}
-                    </View>
+                    </TouchableOpacity>
                   );
                 })}
               </View>
@@ -1403,7 +1447,7 @@ export default function App() {
                 </View>
 
                 {/* Fuel Records List */}
-                {((db.fuel_records || []).filter(f => (f.vehicle_id || 'car_1') === vId)).map(f => (
+                {((db.fuel_records || []).filter(f => String(f.vehicle_id || 'car_1') === vId)).map(f => (
                   <View key={f.id} style={[styles.consumableCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <Text style={{ fontSize: 13, fontWeight: 'bold', color: colors.text }}>
@@ -1483,7 +1527,7 @@ export default function App() {
                   </TouchableOpacity>
                 </View>
 
-                {((db.other_expenses || []).filter(e => (e.vehicle_id || 'car_1') === vId)).map(e => (
+                {((db.other_expenses || []).filter(e => String(e.vehicle_id || 'car_1') === vId)).map(e => (
                   <View key={e.id} style={[styles.consumableCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <Text style={{ fontSize: 13, fontWeight: 'bold', color: colors.text }}>
@@ -1695,7 +1739,7 @@ export default function App() {
               </View>
 
               {/* Tyre Sets List */}
-              {((db.tyre_sets || []).filter(t => (t.vehicle_id || 'car_1') === vId)).map(t => (
+              {((db.tyre_sets || []).filter(t => String(t.vehicle_id || 'car_1') === vId)).map(t => (
                 <View key={t.id} style={[styles.consumableCard, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Text style={{ fontSize: 13, fontWeight: 'bold', color: colors.text }}>
@@ -1738,7 +1782,7 @@ export default function App() {
             </View>
 
             {(db.vehicles || []).map(v => (
-              <View key={v.id} style={[styles.garageCard, { backgroundColor: colors.card, borderColor: v.id === vId ? '#3b82f6' : colors.cardBorder }]}>
+              <View key={v.id} style={[styles.garageCard, { backgroundColor: colors.card, borderColor: String(v.id) === vId ? '#3b82f6' : colors.cardBorder }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 14, fontWeight: 'bold', color: colors.text }}>{v.name}</Text>
@@ -1746,7 +1790,7 @@ export default function App() {
                       {v.plate ? ('[' + v.plate + '] • ') : ''}{Number(v.current_km || 0).toLocaleString('ru-RU')} км • {v.engine || 'ДВС'}
                     </Text>
                   </View>
-                  {v.id === vId ? (
+                  {String(v.id) === vId ? (
                     <View style={[styles.statusBadge, { backgroundColor: '#3b82f620', borderColor: '#3b82f6' }]}>
                       <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#3b82f6' }}>ТЕКУЩИЙ</Text>
                     </View>
@@ -2467,15 +2511,26 @@ export default function App() {
 
               {toParts.map((p, pIdx) => (
                 <View key={p.temp_id || pIdx} style={[styles.consumableCard, { backgroundColor: colors.cardSecondary, borderColor: colors.cardBorder }]}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 12, fontWeight: 'bold', color: colors.text, flex: 1 }}>{p.item_name}</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <TextInput
+                      style={[styles.modalInput, { flex: 1, backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text, fontWeight: 'bold', marginBottom: 0, paddingVertical: 4, marginRight: 8 }]}
+                      placeholder="Название детали или работы"
+                      placeholderTextColor={colors.textMuted}
+                      value={p.item_name}
+                      onChangeText={(val) => {
+                        const updated = [...toParts];
+                        updated[pIdx].item_name = val;
+                        setToParts(updated);
+                      }}
+                    />
                     <TouchableOpacity
                       onPress={() => {
                         const updated = toParts.filter((_, idx) => idx !== pIdx);
                         setToParts(updated);
                       }}
+                      style={{ padding: 4 }}
                     >
-                      <Text style={{ fontSize: 12, color: '#ef4444', fontWeight: 'bold' }}>✕</Text>
+                      <Text style={{ fontSize: 14, color: '#ef4444', fontWeight: 'bold' }}>✕</Text>
                     </TouchableOpacity>
                   </View>
 
@@ -2507,14 +2562,57 @@ export default function App() {
                 </View>
               ))}
 
+              {/* Quick suggestion chips */}
+              {(() => {
+                const existingNames = new Set(toParts.map(p => (p.item_name || '').toLowerCase()));
+                const suggestions = (db.trackers || []).filter(t => t.enabled !== false && !existingNames.has((t.name || '').toLowerCase())).slice(0, 5);
+                if (suggestions.length === 0) return null;
+                return (
+                  <View style={{ marginTop: 4, marginBottom: 8 }}>
+                    <Text style={{ fontSize: 10, color: colors.textMuted, marginBottom: 4 }}>Быстро добавить из регламентов:</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        {suggestions.map(s => (
+                          <TouchableOpacity
+                            key={s.id}
+                            onPress={() => {
+                              setToParts([
+                                ...toParts,
+                                {
+                                  temp_id: 'part_' + Date.now() + '_' + Math.random(),
+                                  item_name: s.name,
+                                  category: s.category || 'Двигатель',
+                                  brand: s.brand || '',
+                                  article: s.article || '',
+                                  quantity: 1,
+                                  unit: 'шт',
+                                  total_price: '',
+                                  interval_km: s.interval_km || 7500,
+                                  interval_hours: parseEngineHours(s.interval_hours),
+                                  store: '',
+                                  note: ''
+                                }
+                              ]);
+                            }}
+                            style={{ backgroundColor: colors.cardSecondary, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: colors.cardBorder }}
+                          >
+                            <Text style={{ fontSize: 11, color: colors.primary }}>+ {s.name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  </View>
+                );
+              })()}
+
               <TouchableOpacity
                 onPress={() => {
                   setToParts([
                     ...toParts,
                     {
                       temp_id: 'part_' + Date.now(),
-                      item_name: 'Новая деталь / работа',
-                      category: 'Прочее',
+                      item_name: '',
+                      category: 'Расходники',
                       total_price: '',
                       interval_km: 7500,
                       interval_hours: 0
@@ -2523,7 +2621,7 @@ export default function App() {
                 }}
                 style={{ paddingVertical: 8, alignItems: 'center', marginBottom: 12 }}
               >
-                <Text style={{ fontSize: 12, color: '#3b82f6', fontWeight: 'bold' }}>+ Добавить еще позицию в ТО</Text>
+                <Text style={{ fontSize: 12, color: '#3b82f6', fontWeight: 'bold' }}>+ Добавить еще деталь / работу</Text>
               </TouchableOpacity>
 
               <View style={styles.modalActions}>
@@ -2534,6 +2632,15 @@ export default function App() {
                   <Text style={{ color: '#fff', fontWeight: 'bold' }}>Сохранить ТО</Text>
                 </TouchableOpacity>
               </View>
+
+              {editingPartIds && editingPartIds.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => deleteTOEvent()}
+                  style={{ marginTop: 12, paddingVertical: 10, alignItems: 'center', backgroundColor: '#ef444415', borderRadius: 8, borderWidth: 1, borderColor: '#ef444440' }}
+                >
+                  <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: 'bold' }}>🗑️ Удалить это событие ТО</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -2615,6 +2722,29 @@ export default function App() {
                 onChangeText={setTrSpec}
               />
 
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Бренд детали:</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    placeholder="ZIC, Mann, VIC..."
+                    placeholderTextColor={colors.textMuted}
+                    value={trBrand}
+                    onChangeText={setTrBrand}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>Артикул / Код:</Text>
+                  <TextInput
+                    style={[styles.modalInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.text }]}
+                    placeholder="1658134508..."
+                    placeholderTextColor={colors.textMuted}
+                    value={trArticle}
+                    onChangeText={setTrArticle}
+                  />
+                </View>
+              </View>
+
               <View style={styles.modalActions}>
                 <TouchableOpacity onPress={() => setTrackerModalVisible(false)} style={styles.modalCancelBtn}>
                   <Text style={{ color: colors.textMuted, fontWeight: 'bold' }}>Отмена</Text>
@@ -2623,6 +2753,19 @@ export default function App() {
                   <Text style={{ color: '#fff', fontWeight: 'bold' }}>Сохранить</Text>
                 </TouchableOpacity>
               </View>
+
+              {editingTrackerId && (
+                <TouchableOpacity
+                  onPress={() => {
+                    const idToDelete = editingTrackerId;
+                    setTrackerModalVisible(false);
+                    deleteTracker(idToDelete);
+                  }}
+                  style={{ marginTop: 14, paddingVertical: 10, alignItems: 'center', backgroundColor: '#ef444415', borderRadius: 8, borderWidth: 1, borderColor: '#ef444440' }}
+                >
+                  <Text style={{ color: '#ef4444', fontSize: 12, fontWeight: 'bold' }}>🗑️ Удалить этот регламент</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
           </View>
         </View>

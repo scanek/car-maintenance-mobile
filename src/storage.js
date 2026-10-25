@@ -778,6 +778,17 @@ export async function resetDatabase(mode = 'clean') {
   }
 }
 
+// --- ENGINE HOURS HELPER (INTEGER HOURS ONLY) ---
+export function parseEngineHours(val) {
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'string' && val.includes(':')) {
+    const parts = val.split(':');
+    return Math.round(Number(parts[0]) || 0);
+  }
+  const num = Number(val);
+  return isNaN(num) ? 0 : Math.round(num);
+}
+
 // Smart matching helper for trackers imported without explicit 'match' field
 function deriveSmartTrackerMatch(name) {
   if (!name || typeof name !== 'string') return '';
@@ -861,7 +872,7 @@ export function normalizeImportedBackup(payload) {
         purchase_date: v.purchase_date ? String(v.purchase_date).split('T')[0] : new Date().toISOString().split('T')[0],
         purchase_price: Number(v.purchase_price) || 0,
         current_km: Number(v.current_km ?? v.current_odometer ?? v.starting_odometer ?? 0),
-        current_engine_hours: Number(v.current_engine_hours) || 0,
+        current_engine_hours: parseEngineHours(v.current_engine_hours),
         oil_spec: v.oil_spec || ''
       });
 
@@ -873,10 +884,11 @@ export function normalizeImportedBackup(payload) {
       rawServices.forEach((s) => {
         const sDate = s.date ? String(s.date).split('T')[0] : new Date().toISOString().split('T')[0];
         const sMileage = Number(s.odometer ?? s.mileage ?? 0);
-        const sHours = Number(s.engine_hours) || 0;
+        const sHours = parseEngineHours(s.engine_hours);
         const sTag = s.to_tag || s.title || 'ТО';
         const sStore = s.store || '';
         const sNote = s.description || s.notes || s.note || '';
+        const groupId = s.group_id || ('to_' + carId + '_' + sDate + '_' + sMileage);
 
         if (Array.isArray(s.items) && s.items.length > 0) {
           // Разворачиваем вложенные позиции деталей
@@ -885,6 +897,7 @@ export function normalizeImportedBackup(payload) {
               id: recordCounter++,
               vehicle_id: carId,
               to_tag: sTag,
+              group_id: groupId,
               date: sDate,
               mileage: sMileage,
               engine_hours: sHours,
@@ -912,6 +925,7 @@ export function normalizeImportedBackup(payload) {
               id: recordCounter++,
               vehicle_id: carId,
               to_tag: sTag,
+              group_id: groupId,
               date: sDate,
               mileage: sMileage,
               engine_hours: sHours,
@@ -938,6 +952,7 @@ export function normalizeImportedBackup(payload) {
             id: recordCounter++,
             vehicle_id: carId,
             to_tag: sTag,
+            group_id: groupId,
             date: sDate,
             mileage: sMileage,
             engine_hours: sHours,
@@ -951,7 +966,7 @@ export function normalizeImportedBackup(payload) {
             price_per_unit: Number(s.total_cost ?? s.total_price ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
             total_price: Number(s.total_cost ?? s.total_price ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
             interval_km: Number(s.interval_km) || 7500,
-            interval_hours: Number(s.interval_hours) || 0,
+            interval_hours: parseEngineHours(s.interval_hours),
             next_km: Number(s.next_km) || (sMileage + (Number(s.interval_km) || 7500)),
             next_hours: 0,
             note: sNote,
@@ -1046,10 +1061,10 @@ export function normalizeImportedBackup(payload) {
               category: t.category || 'Двигатель',
               match: matchTerm,
               interval_km: Number(t.interval_km ?? t.interval_distance ?? 7500),
-              interval_hours: Number(t.interval_hours) || 0,
+              interval_hours: parseEngineHours(t.interval_hours),
               interval_months: Number(t.interval_months) || 12,
               warn_km: Number(t.warn_km ?? t.notify_before_distance ?? 1000),
-              warn_hours: Number(t.warn_hours ?? t.notify_before_hours ?? 30),
+              warn_hours: parseEngineHours(t.warn_hours ?? t.notify_before_hours ?? 30),
               warn_days: Number(t.warn_days ?? t.notify_before_days ?? 30),
               spec: t.spec || '',
               brand: t.brand || '',
@@ -1079,7 +1094,7 @@ export function normalizeImportedBackup(payload) {
         purchase_date: v.purchase_date ? String(v.purchase_date).split('T')[0] : new Date().toISOString().split('T')[0],
         purchase_price: Number(v.purchase_price) || 0,
         current_km: Number(v.current_km ?? v.current_odometer ?? v.starting_odometer ?? 0),
-        current_engine_hours: Number(v.current_engine_hours) || 0,
+        current_engine_hours: parseEngineHours(v.current_engine_hours),
         oil_spec: v.oil_spec || ''
       });
     });
@@ -1094,10 +1109,11 @@ export function normalizeImportedBackup(payload) {
       const sCarId = String(s.vehicle_id || defaultCarId);
       const sDate = s.date ? String(s.date).split('T')[0] : new Date().toISOString().split('T')[0];
       const sMileage = Number(s.odometer ?? s.mileage ?? 0);
-      const sHours = Number(s.engine_hours) || 0;
+      const sHours = parseEngineHours(s.engine_hours);
       const sTag = s.to_tag || s.title || 'ТО';
       const sStore = s.store || '';
       const sNote = s.description || s.notes || s.note || '';
+      const groupId = s.group_id || ('to_' + sCarId + '_' + sDate + '_' + sMileage);
 
       if (Array.isArray(s.items) && s.items.length > 0) {
         s.items.forEach((it) => {
@@ -1105,6 +1121,7 @@ export function normalizeImportedBackup(payload) {
             id: recordCounter++,
             vehicle_id: sCarId,
             to_tag: sTag,
+            group_id: groupId,
             date: sDate,
             mileage: sMileage,
             engine_hours: sHours,
@@ -1131,6 +1148,7 @@ export function normalizeImportedBackup(payload) {
             id: recordCounter++,
             vehicle_id: sCarId,
             to_tag: sTag,
+            group_id: groupId,
             date: sDate,
             mileage: sMileage,
             engine_hours: sHours,
@@ -1156,6 +1174,7 @@ export function normalizeImportedBackup(payload) {
           id: recordCounter++,
           vehicle_id: sCarId,
           to_tag: sTag,
+          group_id: groupId,
           date: sDate,
           mileage: sMileage,
           engine_hours: sHours,
@@ -1165,13 +1184,13 @@ export function normalizeImportedBackup(payload) {
           article: s.article || '',
           quantity: Number(s.quantity) || 1,
           unit: s.unit || 'шт',
-          price_type: s.price_type || 'total',
-          price_per_unit: Number(s.price_per_unit ?? s.total_cost ?? s.total_price ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
-          total_price: Number(s.total_price ?? s.total_cost ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
+          price_type: 'total',
+          price_per_unit: Number(s.total_cost ?? s.total_price ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
+          total_price: Number(s.total_cost ?? s.total_price ?? ((Number(s.cost_parts) || 0) + (Number(s.cost_labor) || 0))),
           interval_km: Number(s.interval_km) || 7500,
-          interval_hours: Number(s.interval_hours) || 0,
+          interval_hours: parseEngineHours(s.interval_hours),
           next_km: Number(s.next_km) || (sMileage + (Number(s.interval_km) || 7500)),
-          next_hours: Number(s.next_hours) || 0,
+          next_hours: 0,
           note: sNote,
           store: sStore,
           url: s.url || ''
@@ -1426,12 +1445,12 @@ export function getActiveVehicle(db) {
 export function switchActiveTyreSet(db, targetSeason) {
   const vehicle = getActiveVehicle(db);
   if (!vehicle) return db;
-  const vId = vehicle.id;
+  const vId = String(vehicle.id);
   const currentKm = Number(vehicle.current_km) || 0;
   const today = new Date().toISOString().split('T')[0];
 
   const tyreSets = (db.tyre_sets || []).map(t => {
-    if (t.vehicle_id !== vId) return t;
+    if (String(t.vehicle_id) !== vId) return t;
 
     if (t.is_active) {
       // Currently active set being removed: add accumulated mileage
@@ -1486,16 +1505,16 @@ export function calculateDashboardStatus(db) {
     };
   }
 
-  const vId = vehicle.id;
+  const vId = String(vehicle.id);
   const currentKm = Number(vehicle.current_km) || 0;
-  const currentHours = Number(vehicle.current_engine_hours) || 0;
+  const currentHours = parseEngineHours(vehicle.current_engine_hours);
 
   // 1. TO & Maintenance Expenses
-  const toRecords = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === vId);
+  const toRecords = (db.maintenance_records || []).filter(r => String(r.vehicle_id || 'car_1') === vId);
   const toSpent = toRecords.reduce((sum, r) => sum + (Number(r.total_price) || 0), 0);
 
   // 2. Fuel Expenses & Consumption
-  const fuelRecords = (db.fuel_records || []).filter(f => (f.vehicle_id || 'car_1') === vId);
+  const fuelRecords = (db.fuel_records || []).filter(f => String(f.vehicle_id || 'car_1') === vId);
   fuelRecords.sort((a, b) => (Number(a.mileage) - Number(b.mileage)) || String(a.date).localeCompare(String(b.date)));
   
   const fuelSpent = fuelRecords.reduce((sum, f) => sum + (Number(f.total_price) || 0), 0);
@@ -1518,7 +1537,7 @@ export function calculateDashboardStatus(db) {
   }
 
   // 3. Other Expenses (Insurances, Taxes, Tolls, Washes)
-  const otherExpenses = (db.other_expenses || []).filter(e => (e.vehicle_id || 'car_1') === vId);
+  const otherExpenses = (db.other_expenses || []).filter(e => String(e.vehicle_id || 'car_1') === vId);
   const expensesSpent = otherExpenses.reduce((sum, e) => sum + (Number(e.total_price) || 0), 0);
 
   // 4. Total Cost of Ownership (TCO)
@@ -1535,7 +1554,7 @@ export function calculateDashboardStatus(db) {
   const costPerDay = Math.round(totalSpent / diffDays);
 
   // 5. Active Tyre Set
-  const tyreSets = (db.tyre_sets || []).filter(t => (t.vehicle_id || 'car_1') === vId);
+  const tyreSets = (db.tyre_sets || []).filter(t => String(t.vehicle_id || 'car_1') === vId);
   const activeTyre = tyreSets.find(t => t.is_active) || (tyreSets.length > 0 ? tyreSets[0] : null);
   let liveTyreKm = 0;
   if (activeTyre) {
@@ -1561,17 +1580,20 @@ export function calculateDashboardStatus(db) {
     const latest = matching.length > 0 ? matching[matching.length - 1] : null;
 
     const intervalKm = Number(tracker.interval_km) || 7500;
-    const intervalH = Number(tracker.interval_hours) || 0;
+    const intervalH = parseEngineHours(tracker.interval_hours);
     const intervalMonths = Number(tracker.interval_months) || 12;
 
     const warnKm = Number(tracker.warn_km) || 1000;
-    const warnH = Number(tracker.warn_hours) || 30;
+    const warnH = parseEngineHours(tracker.warn_hours) || 30;
     const warnDays = Number(tracker.warn_days) || 30;
 
-    if (latest) {
-      const lastKm = Number(latest.mileage) || 0;
-      const lastH = Number(latest.engine_hours) || 0;
-      const lastDate = latest.date ? new Date(latest.date) : new Date();
+    const hasTrackerHistory = (tracker.last_service_odometer !== undefined && tracker.last_service_odometer !== null) || (tracker.last_km !== undefined && tracker.last_km !== null);
+
+    if (latest || hasTrackerHistory) {
+      const lastKm = latest ? (Number(latest.mileage) || 0) : (Number(tracker.last_km ?? tracker.last_service_odometer) || 0);
+      const lastH = latest ? parseEngineHours(latest.engine_hours) : parseEngineHours(tracker.last_hours ?? tracker.last_service_hours);
+      const rawDate = latest ? latest.date : (tracker.last_service_date || tracker.last_date);
+      const lastDate = rawDate ? new Date(rawDate) : (vehicle.purchase_date ? new Date(vehicle.purchase_date) : new Date());
 
       const effCurrentKm = Math.max(currentKm, lastKm);
       const effCurrentH = Math.max(currentHours, lastH);
@@ -1611,8 +1633,8 @@ export function calculateDashboardStatus(db) {
         id: tracker.id,
         name: tracker.name,
         icon: tracker.icon || '⚙️',
-        category: tracker.category || latest.category || 'Двигатель',
-        last_date: latest.date || '—',
+        category: tracker.category || (latest && latest.category) || 'Двигатель',
+        last_date: rawDate ? String(rawDate).split('T')[0] : '—',
         last_km: lastKm,
         last_hours: lastH,
         interval_km: intervalKm,
@@ -1621,15 +1643,15 @@ export function calculateDashboardStatus(db) {
         next_km: nextKm,
         next_hours: nextH,
         rem_km: remKm,
-        rem_hours: remH,
+        rem_hours: remH !== null ? Math.round(remH) : null,
         rem_days: remDays,
         wear_percent: wearPercent,
         status_code: statusCode,
         status_text: statusText,
-        brand: latest.brand || tracker.brand || '',
-        article: latest.article || tracker.article || '',
+        brand: (latest && latest.brand) || tracker.brand || '',
+        article: (latest && latest.article) || tracker.article || '',
         spec: tracker.spec || '',
-        to_tag: latest.to_tag || ''
+        to_tag: (latest && latest.to_tag) || '—'
       });
     } else {
       const nextKm = currentKm + intervalKm;
@@ -1652,7 +1674,7 @@ export function calculateDashboardStatus(db) {
         next_km: nextKm,
         next_hours: nextH,
         rem_km: remKm,
-        rem_hours: remH,
+        rem_hours: remH !== null ? Math.round(remH) : null,
         rem_days: intervalDays,
         wear_percent: 0,
         status_code: 'ok',
@@ -1693,24 +1715,29 @@ export function calculateDashboardStatus(db) {
 export function getTOGroups(db) {
   const vehicle = getActiveVehicle(db);
   if (!vehicle) return [];
-  const vId = vehicle.id;
-  const records = (db.maintenance_records || []).filter(r => (r.vehicle_id || 'car_1') === vId);
+  const vId = String(vehicle.id);
+  const records = (db.maintenance_records || []).filter(r => String(r.vehicle_id || 'car_1') === vId);
 
   const groups = {};
   records.forEach(r => {
-    const tag = r.to_tag || 'Без метки';
-    if (!groups[tag]) {
-      groups[tag] = {
+    const tag = r.to_tag || 'ТО';
+    const sDate = r.date || '—';
+    const sMileage = r.mileage !== undefined && r.mileage !== null ? r.mileage : '';
+    const groupKey = r.group_id || `${tag}_${sDate}_${sMileage}`;
+
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
+        group_id: groupKey,
         to_tag: tag,
         date: r.date,
         mileage: r.mileage,
-        engine_hours: r.engine_hours,
+        engine_hours: parseEngineHours(r.engine_hours),
         total_cost: 0,
         parts: []
       };
     }
-    groups[tag].total_cost += (Number(r.total_price) || 0);
-    groups[tag].parts.push(r);
+    groups[groupKey].total_cost += (Number(r.total_price) || 0);
+    groups[groupKey].parts.push(r);
   });
 
   return Object.values(groups).sort((a, b) => (Number(b.mileage) - Number(a.mileage)) || String(b.date).localeCompare(String(a.date)));
